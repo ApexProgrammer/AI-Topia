@@ -5,7 +5,7 @@ from ..ai.neural_network import ColonistBrain, INPUT_SIZE
 from ..config import (COLONIST_SPEED, WORKING_AGE, RETIREMENT_AGE, 
                      REPRODUCTION_AGE_MIN, REPRODUCTION_AGE_MAX, 
                      BUILDING_TYPES, TILE_SIZE, MOVEMENT_SPEED,
-                     MARRIAGE_CHANCE, ANIMATION_SPEED, WALK_FRAMES)
+                     MARRIAGE_CHANCE, ANIMATION_SPEED, WALK_FRAMES, RESOURCE_CONSUMPTION_RATE, JOB_SALARIES, MINIMUM_WAGE)
 from .building import Building
 
 class Colonist:
@@ -105,95 +105,144 @@ class Colonist:
 
     def update_basic_needs(self):
         """Update basic needs like energy, health, and resources"""
-        # Energy consumption
-        energy_loss = 0.1 * (2 - self.traits['work_ethic']/100)
-        self.energy -= energy_loss
-        if self.energy < 0:
-            self.health -= 0.1
+        # Energy consumption based on work ethic and activity
+        base_energy_loss = RESOURCE_CONSUMPTION_RATE * (2 - self.traits['work_ethic']/100)
+        if self.is_walking:
+            base_energy_loss *= 1.5
+        self.energy = max(0, min(100, self.energy - base_energy_loss))
         
-        # Food consumption
+        # Health regeneration when resting
+        if self.energy > 50:
+            self.health = min(100, self.health + 0.05)
+        elif self.energy < 20:
+            self.health = max(0, self.health - 0.02)
+        
+        # Food consumption and effects
         if self.inventory['food'] > 0:
-            self.inventory['food'] -= 0.01
+            food_consumed = RESOURCE_CONSUMPTION_RATE
+            self.inventory['food'] = max(0, self.inventory['food'] - food_consumed)
             self.health = min(100, self.health + 0.1)
+            self.energy = min(100, self.energy + 0.2)
         else:
-            self.health -= 0.05
+            self.health = max(0, self.health - 0.05)
+            self.energy = max(0, self.energy - 0.1)
         
         # Work and earn money
         if self.job and WORKING_AGE <= self.age <= RETIREMENT_AGE:
-            efficiency = 1 + (self.traits['work_ethic'] - 50) / 100
-            earned = (self.job.salary / 30) * efficiency
+            # Calculate work efficiency
+            efficiency = (1 + (self.traits['work_ethic'] - 50) / 100) * (self.energy / 100)
+            
+            # Get base salary for job type
+            base_salary = JOB_SALARIES.get(self.job.type, MINIMUM_WAGE)
+            
+            # Calculate daily earnings with bonuses
+            earned = (base_salary / 30) * efficiency  # Daily wage
+            if self.traits['intelligence'] > 70:
+                earned *= 1.2  # Smart worker bonus
+            if self.traits['creativity'] > 70:
+                earned *= 1.1  # Creative worker bonus
+                
             self.money += earned
             self.inventory['money'] = self.money
+            
+            # Produce resources if applicable
+            if hasattr(self.job, 'produces'):
+                production = self.job.production_rate * efficiency
+                if self.job.produces in self.inventory:
+                    self.inventory[self.job.produces] += production
+                else:
+                    self.inventory[self.job.produces] = production
 
-    def consider_new_project(self):
-        """Consider starting a new building project based on colony needs"""
-        if self.money < 1000:  # Need minimum capital
-            return
+    def update_happiness(self):
+        """Update happiness based on various factors"""
+        # Base happiness changes
+        if self.health < 50:
+            self.happiness -= 0.2
+        elif self.health > 80:
+            self.happiness += 0.1
             
-        # Analyze colony needs
-        housing_needed = len([c for c in self.world.colonists if not c.home]) > 0
-        jobs_needed = len([c for c in self.world.colonists if not c.job]) > 0
-        food_needed = sum(c.inventory['food'] for c in self.world.colonists) < len(self.world.colonists) * 10
-        
-        possible_projects = []
-        
-        if housing_needed:
-            possible_projects.append(('house', 5))
-        if jobs_needed:
-            possible_projects.append(('shop', 3))
-            possible_projects.append(('factory', 4))
-        if food_needed:
-            possible_projects.append(('farm', 5))
+        if self.energy < 30:
+            self.happiness -= 0.2
+        elif self.energy > 70:
+            self.happiness += 0.1
             
-        if possible_projects:
-            project_type, priority = max(possible_projects, key=lambda x: x[1])
-            if self.money >= BUILDING_TYPES[project_type]['cost']:
-                self.start_project(project_type)
+        # Social factors
+        if self.spouse:
+            self.happiness += 0.2
+        if len(self.children) > 0:
+            self.happiness += 0.1 * len(self.children)
+        if len(self.friends) > 0:
+            self.happiness += 0.05 * len(self.friends)
+            
+        # Economic factors
+        if self.job:
+            self.happiness += 0.1
+        if self.home:
+            self.happiness += 0.2
+        if self.money > 1000:
+            self.happiness += 0.1
+        elif self.money < 100:
+            self.happiness -= 0.2
+            
+        # Cap happiness
+        self.happiness = max(0, min(100, self.happiness))
 
-    def start_project(self, building_type):
-        """Start a new building project"""
-        # Find suitable location
-        x = random.randint(100, self.world.width - 100)
-        y = random.randint(100, self.world.height - 100)
-        
-        # Check if location is clear (simple check)
-        for building in self.world.buildings:
-            if ((building.x - x)**2 + (building.y - y)**2)**0.5 < 100:  # If location too close to other buildings
-                return  # Location too close to other buildings
-        
-        self.current_project = {
-            'type': building_type,
-            'x': x,
-            'y': y,
-            'progress': 0,
-            'required_progress': BUILDING_TYPES[building_type]['build_time']
-        }
-        self.target_position = (x, y)
-        self.money -= BUILDING_TYPES[building_type]['cost']
-        self.inventory['money'] = self.money
+    def seek_job(self):
+        """Find and move to an available job"""
+        if not self.job and WORKING_AGE <= self.age <= RETIREMENT_AGE:
+            available_jobs = self.world.get_available_jobs()
+            if available_jobs:
+                # Filter jobs by skills and traits
+                suitable_jobs = []
+                for job in available_jobs:
+                    score = 0
+                    if job.type == 'farmer':
+                        score = self.traits['work_ethic']
+                    elif job.type == 'factory_worker':
+                        score = (self.traits['work_ethic'] + self.traits['intelligence']) / 2
+                    elif job.type == 'shopkeeper':
+                        score = (self.traits['sociability'] + self.traits['creativity']) / 2
+                    elif job.type == 'banker':
+                        score = self.traits['intelligence']
+                    elif job.type == 'government_worker':
+                        score = (self.traits['intelligence'] + self.traits['leadership']) / 2
+                    
+                    if score > 50:  # Only consider jobs they're good at
+                        suitable_jobs.append((job, score))
+                
+                if suitable_jobs:
+                    # Choose job weighted by suitability score
+                    job, _ = max(suitable_jobs, key=lambda x: x[1])
+                    self.move_to_job(job)
 
-    def update_project(self):
-        """Update current building project"""
-        if not self.current_project:
-            return
+    def move_to_job(self, job):
+        """Move to and take a job"""
+        current_grid_x, current_grid_y = self.world.get_grid_position(self.x, self.y)
+        job_grid_x, job_grid_y = self.world.get_grid_position(job.x, job.y)
+        
+        # Find walkable position near job
+        for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
+            target_x = job_grid_x + dx
+            target_y = job_grid_y + dy
             
-        # Need to be close to build
-        dx = self.current_project['x'] - self.x
-        dy = self.current_project['y'] - self.y
-        if (dx*dx + dy*dy) < 100:  # Within building range
-            # Progress based on construction skill
-            progress_rate = 0.5 + (self.construction_skill / 100)
-            self.current_project['progress'] += progress_rate
-            
-            # Complete project
-            if self.current_project['progress'] >= self.current_project['required_progress']:
-                self.world.create_building(
-                    self.current_project['type'],
-                    self.current_project['x'],
-                    self.current_project['y']
-                )
-                self.current_project = None
-                self.target_position = None
+            if (0 <= target_x < self.world.current_size and 
+                0 <= target_y < self.world.current_size):
+                
+                # Remove from current position
+                self.world.remove_from_grid(self, current_grid_x, current_grid_y)
+                
+                # Move to new position
+                target_pos = self.world.get_pixel_position(target_x, target_y)
+                self.target_position = target_pos
+                
+                # Add to new position
+                self.world.add_to_grid(self, target_x, target_y)
+                
+                # Assign job
+                self.job = job
+                job.employee = self
+                self.happiness += 10  # Happy to get a job
+                break
 
     def move_towards_target(self):
         """Move towards target position with grid-based movement"""
@@ -515,26 +564,6 @@ class Colonist:
         trait_diff = sum(abs(self.traits[t] - other.traits[t]) for t in self.traits)
         base_compatibility = 100 - trait_diff/len(self.traits)
         return base_compatibility + random.randint(-20, 20)
-
-    def update_happiness(self):
-        """Update happiness based on personality and situation"""
-        # Base happiness affected by basic needs
-        base_happiness = (self.health + self.energy) / 2
-        
-        # Social happiness based on personality
-        social_factor = (len(self.friends) * 10 - len(self.enemies) * 15) * (self.traits['sociability'] / 100)
-        
-        # Work happiness based on personality
-        work_factor = 0
-        if self.job:
-            work_factor = 20 * (self.traits['ambition'] / 100)
-        else:
-            work_factor = -20 * (self.traits['ambition'] / 100)
-        
-        # Money happiness based on personality
-        money_factor = (self.money / 1000) * (self.traits['ambition'] / 100)
-        
-        self.happiness = max(0, min(100, base_happiness + social_factor + work_factor + money_factor))
 
     def execute_action(self, action):
         """Execute the action chosen by the AI"""

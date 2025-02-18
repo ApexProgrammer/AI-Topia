@@ -8,7 +8,8 @@ from .config import (TILE_SIZE, INITIAL_MAP_SIZE, EXPANSION_BUFFER, MIN_MAP_SIZE
                     COLONISTS_PER_TILE, BUILDINGS_PER_TILE,
                     MIN_BUILDING_SPACING, BUILDING_MARGIN,
                     INITIAL_COLONISTS, CONSTRUCTION_SKILL_THRESHOLD,
-                    MIN_MONEY_FOR_BUILDING, BUILDING_CHANCE)
+                    MIN_MONEY_FOR_BUILDING, BUILDING_CHANCE, TAX_RATE, INTEREST_RATE,
+                    INITIAL_TREASURY)
 
 class World:
     def __init__(self, screen_width=None, screen_height=None):
@@ -16,6 +17,10 @@ class World:
         self.width = self.current_size * TILE_SIZE
         self.height = self.current_size * TILE_SIZE
         self.ui = None
+        
+        # Store screen dimensions
+        self.screen_width = screen_width
+        self.screen_height = screen_height
         
         # Calculate center offset
         if screen_width and screen_height:
@@ -32,21 +37,22 @@ class World:
         self.homes = []
         
         # Initialize state
-        self.treasury = 10000
+        self.treasury = INITIAL_TREASURY
         self.gdp = 0
         self.leader = None
         self.election_timer = 0
         self.election_candidates = []
         self.term_length = 1000
         
-        # History
+        # History tracking
         self.expansion_history = []
         self.birth_history = []
         self.death_history = []
         self.election_history = []
+        self.economic_history = []  # Track economic metrics
         
         # Grid tracking
-        self.grid_occupation = {}  # (x, y) -> [entities]
+        self.grid_occupation = {}
         
         # Generate initial colony
         self.generate_initial_colony()
@@ -294,17 +300,98 @@ class World:
         self.handle_deaths()
 
     def update_economy(self):
+        """Update the colony's economy"""
+        current_time = pygame.time.get_ticks()
+        
         # Calculate GDP
         self.gdp = sum(c.money for c in self.colonists)
         
-        # Collect taxes
-        tax_revenue = sum(c.money * 0.1 for c in self.colonists)
-        self.treasury += tax_revenue
+        # Calculate tax revenue
+        tax_revenue = 0
+        for colonist in self.colonists:
+            if colonist.job and colonist.money > 0:
+                tax = colonist.money * TAX_RATE
+                colonist.money -= tax
+                colonist.inventory['money'] = colonist.money
+                tax_revenue += tax
         
-        # Pay government employees
-        gov_expenses = sum(job.salary for job in self.jobs if job.building_type == 'government' and job.employee)
-        self.treasury -= gov_expenses
-
+        # Calculate government expenses
+        gov_expenses = sum(job.salary / 30 for job in self.jobs 
+                         if job.building_type == 'government' and job.employee)
+        
+        # Update treasury with minimum safeguard
+        self.treasury = max(1000, self.treasury + tax_revenue - gov_expenses)
+        
+        # Pay workers based on available funds
+        available_funds = self.treasury - 1000  # Keep minimum reserve
+        if available_funds > 0:
+            total_salaries = sum(job.salary / 30 for job in self.jobs if job.employee)
+            if total_salaries > 0:
+                payment_ratio = min(1.0, available_funds / total_salaries)
+                
+                for job in self.jobs:
+                    if job.employee:
+                        salary = (job.salary / 30) * payment_ratio  # Adjusted daily wage
+                        self.treasury -= salary
+                        job.employee.money += salary
+                        job.employee.inventory['money'] = job.employee.money
+        
+        # Handle building operations
+        for building in self.buildings:
+            if building.is_complete:
+                # Process production
+                if hasattr(building, 'produces'):
+                    workers = len([job for job in building.jobs if job.employee])
+                    if workers > 0:
+                        efficiency = workers / building.max_jobs
+                        production = building.production_rate * efficiency
+                        building.inventory[building.produces] = (
+                            building.inventory.get(building.produces, 0) + production
+                        )
+                
+                # Process sales
+                if hasattr(building, 'sells'):
+                    for resource in building.sells:
+                        if resource in building.inventory and building.inventory[resource] > 0:
+                            # Calculate demand
+                            nearby_colonists = [c for c in self.colonists 
+                                              if ((c.x - building.x)**2 + 
+                                                  (c.y - building.y)**2)**0.5 < 200]
+                            potential_buyers = len(nearby_colonists)
+                            
+                            # Process sales
+                            price = building.prices[resource]
+                            max_sales = min(building.inventory[resource], potential_buyers)
+                            actual_sales = 0
+                            
+                            for colonist in nearby_colonists:
+                                if colonist.money >= price and building.inventory[resource] > 0:
+                                    # Make purchase
+                                    colonist.money -= price
+                                    colonist.inventory['money'] = colonist.money
+                                    colonist.inventory[resource] = (
+                                        colonist.inventory.get(resource, 0) + 1
+                                    )
+                                    building.inventory[resource] -= 1
+                                    building.daily_revenue += price
+                                    actual_sales += 1
+                                    
+                                    if actual_sales >= max_sales:
+                                        break
+        
+        # Record economic metrics
+        self.economic_history.append({
+            'time': current_time,
+            'gdp': self.gdp,
+            'treasury': self.treasury,
+            'tax_revenue': tax_revenue,
+            'expenses': gov_expenses
+        })
+        
+        # Keep history manageable
+        if len(self.economic_history) > 100:
+            self.economic_history = self.economic_history[-100:]
+    
     def update_government(self):
         self.election_timer += 1
         

@@ -1,14 +1,36 @@
 import pygame
-from ..config import BUILDING_TYPES, TILE_SIZE, RESOURCES, SUPPLY_DEMAND_IMPACT, INTEREST_RATE
+from ..config import (BUILDING_TYPES, TILE_SIZE, RESOURCES,
+                     SUPPLY_DEMAND_IMPACT, INTEREST_RATE,
+                     PRICE_VOLATILITY, MARKET_UPDATE_RATE, PRICE_MEMORY,
+                     JOB_SALARIES, MINIMUM_WAGE)
 
 class Job:
-    def __init__(self, building_type, building, salary):
-        self.building_type = building_type
+    def __init__(self, building):
         self.building = building
-        self.salary = salary
+        self.building_type = building.building_type
         self.employee = None
         self.x = building.x
         self.y = building.y
+        
+        # Set salary based on job type
+        if self.building_type == 'farm':
+            self.type = 'farmer'
+            self.salary = JOB_SALARIES['farmer']
+        elif self.building_type == 'factory':
+            self.type = 'factory_worker'
+            self.salary = JOB_SALARIES['factory_worker']
+        elif self.building_type == 'shop':
+            self.type = 'shopkeeper'
+            self.salary = JOB_SALARIES['shopkeeper']
+        elif self.building_type == 'bank':
+            self.type = 'banker'
+            self.salary = JOB_SALARIES['banker']
+        elif self.building_type == 'government':
+            self.type = 'government_worker'
+            self.salary = JOB_SALARIES['government_worker']
+        else:
+            self.type = 'worker'
+            self.salary = MINIMUM_WAGE
 
 class Building:
     def __init__(self, building_type, x, y, world):
@@ -28,26 +50,37 @@ class Building:
         self.is_complete = False
         self.current_occupants = 0
         
-        # Resource management
+        # Initialize inventory and prices
         self.inventory = {}
-        self.production_timer = 0
-        if 'produces' in building_config:
-            self.produces = building_config['produces']
-            self.production_rate = building_config['production_rate']
-            self.inventory[self.produces] = 0
-        if 'sells' in building_config:
-            self.sells = building_config['sells']
-            self.markup = building_config['markup']
-            for resource in self.sells:
-                self.inventory[resource] = 0
-        if 'consumes' in building_config:
-            self.consumes = building_config['consumes']
-            self.inventory[self.consumes] = 0
+        self.prices = {}
+        self.price_history = []
+        self.last_market_update = 0
         
-        # Set building-specific properties
+        # Set up based on building type
         if building_type == 'house':
             self.capacity = building_config['capacity']
-        else:
+        elif building_type in ['shop', 'factory', 'farm']:
+            self.jobs = []
+            self.max_jobs = building_config['jobs']
+            
+            if 'produces' in building_config:
+                self.produces = building_config['produces']
+                self.production_rate = building_config['production_rate']
+                self.inventory[self.produces] = 0
+                
+            if 'sells' in building_config:
+                self.sells = building_config['sells']
+                self.markup = building_config['markup']
+                for resource in self.sells:
+                    self.inventory[resource] = 0
+                    self.prices[resource] = RESOURCES[resource]['base_price'] * self.markup
+                    
+        elif building_type == 'bank':
+            self.jobs = []
+            self.max_jobs = building_config['jobs']
+            self.interest_rate = building_config['interest_rate']
+            
+        elif building_type == 'government':
             self.jobs = []
             self.max_jobs = building_config['jobs']
         
@@ -85,18 +118,15 @@ class Building:
         else:
             # Handle production
             if hasattr(self, 'produces'):
-                self.production_timer += 1
-                if self.production_timer >= 60:  # Produce every 60 ticks
-                    self.produce_resources()
-                    self.production_timer = 0
+                self.produce_resources()
             
             # Handle sales
             if hasattr(self, 'sells'):
-                self.handle_sales()
+                self.update_prices()
             
             # Handle banking
             if self.building_type == 'bank':
-                self.handle_banking()
+                self.process_banking()
             
             # Track finances
             if len(self.profit_history) >= 30:  # Keep last 30 days
@@ -106,60 +136,97 @@ class Building:
             self.daily_expenses = 0
 
     def produce_resources(self):
-        """Handle resource production for production buildings"""
-        if not hasattr(self, 'produces'):
+        """Produce resources if this is a production building"""
+        if not hasattr(self, 'produces') or not self.is_complete:
             return
             
-        # Check if we need to consume resources first
-        if hasattr(self, 'consumes'):
-            if self.inventory[self.consumes] < self.production_rate:
-                return  # Not enough resources to produce
-            self.inventory[self.consumes] -= self.production_rate
+        workers = len([job for job in self.jobs if job.employee])
+        if workers > 0:
+            efficiency = workers / self.max_jobs
+            production = self.production_rate * efficiency
+            self.inventory[self.produces] = self.inventory.get(self.produces, 0) + production
+
+    def update_prices(self):
+        """Update prices based on supply and demand"""
+        if not hasattr(self, 'sells') or not self.is_complete:
+            return
             
-        # Calculate production based on number of workers
-        efficiency = len([job for job in self.jobs if job.employee]) / self.max_jobs
-        production = self.production_rate * efficiency
+        current_time = pygame.time.get_ticks()
+        if current_time - self.last_market_update < MARKET_UPDATE_RATE:
+            return
+            
+        self.last_market_update = current_time
         
-        self.inventory[self.produces] += production
-
-    def handle_sales(self):
-        """Handle resource sales for shops and restaurants"""
         for resource in self.sells:
-            # Calculate demand based on nearby colonists
-            nearby_colonists = [c for c in self.world.colonists 
-                              if ((c.x - self.x)**2 + (c.y - self.y)**2)**0.5 < 100]
-            demand = len(nearby_colonists) * 0.1
-            
-            # Calculate price based on supply and demand
             base_price = RESOURCES[resource]['base_price']
-            supply_factor = self.inventory[resource] / 100  # Normalize inventory
-            price = base_price * self.markup * (1 + SUPPLY_DEMAND_IMPACT * (demand - supply_factor))
+            current_price = self.prices[resource]
             
-            # Process sales
-            sales = min(demand, self.inventory[resource])
-            self.inventory[resource] -= sales
-            self.daily_revenue += sales * price
+            # Calculate supply factor
+            inventory_level = self.inventory.get(resource, 0)
+            supply_factor = 1.0
+            if inventory_level > 100:
+                supply_factor = 0.9  # Price decrease when oversupplied
+            elif inventory_level < 20:
+                supply_factor = 1.1  # Price increase when undersupplied
+                
+            # Calculate new price
+            target_price = base_price * self.markup * supply_factor
+            price_change = (target_price - current_price) * SUPPLY_DEMAND_IMPACT
+            
+            # Limit price volatility
+            price_change = max(-PRICE_VOLATILITY, min(PRICE_VOLATILITY, price_change))
+            new_price = current_price + price_change
+            
+            # Keep price within reasonable bounds
+            min_price = base_price * 0.5
+            max_price = base_price * 2.0
+            self.prices[resource] = max(min_price, min(max_price, new_price))
+            
+            # Update price history
+            self.price_history.append({
+                'time': current_time,
+                'resource': resource,
+                'price': self.prices[resource]
+            })
+            
+            # Keep history manageable
+            if len(self.price_history) > PRICE_MEMORY:
+                self.price_history = self.price_history[-PRICE_MEMORY:]
 
-    def handle_banking(self):
-        """Handle banking operations"""
+    def process_banking(self):
+        """Process banking operations"""
+        if self.building_type != 'bank' or not self.is_complete:
+            return
+            
+        # Process interest for all colonists
         for colonist in self.world.colonists:
-            if colonist.money > 1000:  # Only pay interest on savings above 1000
-                interest = (colonist.money - 1000) * INTEREST_RATE / 365  # Daily interest
+            if colonist.money > 0:
+                interest = colonist.money * (self.interest_rate / 365)  # Daily interest
                 colonist.money += interest
+                colonist.inventory['money'] = colonist.money
                 self.daily_expenses += interest
+
+    def create_jobs(self):
+        """Create jobs for this building"""
+        if not hasattr(self, 'max_jobs'):
+            return []
+            
+        jobs = []
+        for _ in range(self.max_jobs):
+            job = Job(self)
+            self.jobs.append(job)
+            jobs.append(job)
+        return jobs
 
     def render(self, screen, camera_x=0, camera_y=0, zoom=1.0):
         """Render building with camera transformations"""
-        # Calculate screen position with offset
+        # Calculate screen position
         screen_x = int((self.x + camera_x) * zoom)
         screen_y = int((self.y + camera_y) * zoom)
-        size = int(self.base_size * zoom)
+        size = int(self.size * TILE_SIZE * zoom)
         
-        color = self.colors[self.building_type]
-        
-        # Draw building centered on its position
-        rect = pygame.Rect(screen_x - size//2, screen_y - size//2, 
-                          size, size)
+        # Draw building
+        rect = pygame.Rect(screen_x - size//2, screen_y - size//2, size, size)
         
         if not self.is_complete:
             # Show construction progress
@@ -169,53 +236,55 @@ class Building:
                                       screen_y + size//2 - progress_height,
                                       size, progress_height)
             pygame.draw.rect(screen, (150, 150, 150), rect)
-            pygame.draw.rect(screen, color, progress_rect)
+            pygame.draw.rect(screen, (100, 200, 100), progress_rect)
         else:
+            # Draw completed building
+            if self.building_type == 'house':
+                color = (100, 200, 100)
+            elif self.building_type == 'farm':
+                color = (150, 200, 50)
+            elif self.building_type == 'factory':
+                color = (150, 150, 150)
+            elif self.building_type == 'shop':
+                color = (200, 150, 100)
+            elif self.building_type == 'bank':
+                color = (200, 200, 50)
+            else:
+                color = (200, 100, 100)
+                
             pygame.draw.rect(screen, color, rect)
             
             # Draw resource indicators
-            if self.inventory:
+            if hasattr(self, 'inventory'):
                 bar_width = max(2, int(3 * zoom))
                 for i, (resource, amount) in enumerate(self.inventory.items()):
-                    indicator_color = (255, 255, 0)  # Yellow for resources
-                    indicator_height = min(size, amount / 20 * size)
+                    max_amount = 100
+                    height = min(1.0, amount / max_amount) * size
                     indicator_rect = pygame.Rect(
-                        screen_x - size//2 + (i+1)*5*zoom, 
-                        screen_y + size//2 - indicator_height,
-                        bar_width, indicator_height)
-                    pygame.draw.rect(screen, indicator_color, indicator_rect)
+                        screen_x - size//2 + (i+1)*5*zoom,
+                        screen_y + size//2 - height,
+                        bar_width, height
+                    )
+                    pygame.draw.rect(screen, (255, 255, 0), indicator_rect)
         
         # Draw outline
         pygame.draw.rect(screen, (0, 0, 0), rect, max(1, int(2 * zoom)))
         
-        # Draw occupancy indicator for houses
-        if self.building_type == 'house' and self.is_complete:
-            occupancy_color = (0, 255, 0) if self.current_occupants < self.capacity else (255, 0, 0)
-            indicator_size = max(2, int(3 * zoom))
-            pygame.draw.circle(screen, occupancy_color,
-                             (screen_x, screen_y - size//2 - 5*zoom),
-                             indicator_size)
-        
-        # Draw job indicators for businesses
-        if self.building_type in ['shop', 'factory', 'farm', 'bank'] and self.is_complete:
-            workers = len([job for job in self.jobs if job.employee])
-            job_color = (0, 255, 0) if workers == self.max_jobs else (255, 255, 0)
-            indicator_size = max(2, int(3 * zoom))
-            pygame.draw.circle(screen, job_color,
-                             (screen_x, screen_y - size//2 - 5*zoom),
-                             indicator_size)
-
-    def create_jobs(self):
-        """Create jobs for business and government buildings"""
-        if self.building_type in ['business', 'government']:
-            base_salary = 50 if self.building_type == 'business' else 70
-            jobs = []
-            for _ in range(self.max_jobs):
-                job = Job(self.building_type, self, base_salary)
-                jobs.append(job)
-            self.jobs = jobs
-            return jobs
-        return []
+        # Draw status indicators
+        if self.is_complete:
+            if self.building_type == 'house':
+                # Show occupancy
+                occupancy_color = (0, 255, 0) if self.current_occupants < self.capacity else (255, 0, 0)
+                pygame.draw.circle(screen, occupancy_color,
+                                 (screen_x, screen_y - size//2 - 5*zoom),
+                                 max(2, int(3 * zoom)))
+            elif hasattr(self, 'jobs'):
+                # Show employment
+                workers = len([job for job in self.jobs if job.employee])
+                job_color = (0, 255, 0) if workers == self.max_jobs else (255, 255, 0)
+                pygame.draw.circle(screen, job_color,
+                                 (screen_x, screen_y - size//2 - 5*zoom),
+                                 max(2, int(3 * zoom)))
 
     def add_occupant(self):
         """Add an occupant to a house"""

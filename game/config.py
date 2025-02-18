@@ -10,73 +10,78 @@ INITIAL_MAP_SIZE = 20
 EXPANSION_BUFFER = 2
 MIN_MAP_SIZE = 20
 MAX_MAP_SIZE = 50
-EXPANSION_COST = 1000
+EXPANSION_COST = 500
 
 # Building Spacing
-MIN_BUILDING_SPACING = 2  # Minimum tiles between buildings
-BUILDING_MARGIN = 1      # Margin from grid edges
+MIN_BUILDING_SPACING = 1
+BUILDING_MARGIN = 1
 
 # Colonist Configuration
 COLONIST_SPEED = 0.05
 MOVEMENT_SPEED = 0.05
 DIAGONAL_MOVEMENT = False
 WORKING_AGE = 18
-RETIREMENT_AGE = 65
-LIFE_EXPECTANCY = 80
+RETIREMENT_AGE = 70
+LIFE_EXPECTANCY = 90
 REPRODUCTION_AGE_MIN = 20
-REPRODUCTION_AGE_MAX = 40
-INITIAL_COLONISTS = 10
-REPRODUCTION_BASE_CHANCE = 0.002
-REPRODUCTION_COOLDOWN = 2000
-MARRIAGE_CHANCE = 0.05
+REPRODUCTION_AGE_MAX = 45
+INITIAL_COLONISTS = 40
+REPRODUCTION_BASE_CHANCE = 0.01
+REPRODUCTION_COOLDOWN = 1000
+MARRIAGE_CHANCE = 0.2
 
 # Building Configuration
-BUILDING_CHANCE = 0.02
-MIN_MONEY_FOR_BUILDING = 1000
-CONSTRUCTION_SKILL_THRESHOLD = 50
-BUILD_TIME_MULTIPLIER = 5
+BUILDING_CHANCE = 0.05
+MIN_MONEY_FOR_BUILDING = 800
+CONSTRUCTION_SKILL_THRESHOLD = 40
+BUILD_TIME_MULTIPLIER = 3
 
-# Animation Configuration
-ANIMATION_SPEED = 0.05
-WALK_FRAMES = 20
+# Resource Generation
+FOOD_PRODUCTION_RATE = 15
+GOODS_PRODUCTION_RATE = 8
+RESOURCE_CONSUMPTION_RATE = 0.005
 
-# Population Thresholds for Expansion
-COLONISTS_PER_TILE = 2
-BUILDINGS_PER_TILE = 0.5
+# Economic Configuration
+INITIAL_CURRENCY = 2000
+INITIAL_TREASURY = 20000
+MINIMUM_WAGE = 12
+TAX_RATE = 0.20
+INTEREST_RATE = 0.05
+SALARY_MULTIPLIER = 1.5
 
 # Building Types and Costs
 BUILDING_TYPES = {
     'house': {
-        'cost': 500,
-        'build_time': 200 * BUILD_TIME_MULTIPLIER,
+        'cost': 300,
+        'build_time': 150,
         'capacity': 4,
         'size': 1,
         'priority': 5
     },
     'farm': {
-        'cost': 800,
-        'build_time': 300 * BUILD_TIME_MULTIPLIER,
+        'cost': 500,
+        'build_time': 200,
         'jobs': 4,
         'produces': 'food',
-        'production_rate': 10,
+        'production_rate': 15,
         'size': 2,
         'priority': 4
     },
     'factory': {
-        'cost': 1500,
-        'build_time': 400 * BUILD_TIME_MULTIPLIER,
+        'cost': 1000,
+        'build_time': 300,
         'jobs': 8,
         'produces': 'goods',
-        'production_rate': 5,
+        'production_rate': 8,
         'size': 2,
         'priority': 3
     },
     'shop': {
-        'cost': 1000,
-        'build_time': 250 * BUILD_TIME_MULTIPLIER,
+        'cost': 600,
+        'build_time': 200,
         'jobs': 4,
         'sells': ['food', 'goods'],
-        'markup': 1.5,
+        'markup': 1.3,
         'size': 1,
         'priority': 3
     },
@@ -90,16 +95,16 @@ BUILDING_TYPES = {
         'size': 1
     },
     'bank': {
-        'cost': 2000,
-        'build_time': 350 * BUILD_TIME_MULTIPLIER,
+        'cost': 1200,
+        'build_time': 250,
         'jobs': 5,
         'interest_rate': 0.05,
         'size': 1,
         'priority': 2
     },
     'government': {
-        'cost': 2000,
-        'build_time': 500 * BUILD_TIME_MULTIPLIER,
+        'cost': 1200,
+        'build_time': 400,
         'jobs': 10,
         'size': 2,
         'priority': 1
@@ -108,21 +113,33 @@ BUILDING_TYPES = {
 
 # Resource Configuration
 RESOURCES = {
-    'food': {'base_price': 10},
-    'goods': {'base_price': 20},
-    'meals': {'base_price': 25}
+    'food': {'base_price': 5},
+    'goods': {'base_price': 10},
+    'meals': {'base_price': 15}
 }
 
-# Economic Configuration
-INITIAL_CURRENCY = 1000
-MINIMUM_WAGE = 10
-TAX_RATE = 0.15
-INTEREST_RATE = 0.05
-PRICE_VOLATILITY = 0.1
+# Job Salaries
+JOB_SALARIES = {
+    'farmer': 15,
+    'factory_worker': 18,
+    'shopkeeper': 16,
+    'banker': 22,
+    'government_worker': 20
+}
 
 # Market Configuration
 SUPPLY_DEMAND_IMPACT = 0.2
 PRICE_MEMORY = 10
+PRICE_VOLATILITY = 0.1
+MARKET_UPDATE_RATE = 100
+
+# Animation Configuration
+ANIMATION_SPEED = 0.05
+WALK_FRAMES = 8
+
+# Population Thresholds for Expansion
+COLONISTS_PER_TILE = 2
+BUILDINGS_PER_TILE = 0.5
 
 # Camera Configuration
 CAMERA_ACCELERATION = 2.0

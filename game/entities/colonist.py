@@ -1,0 +1,570 @@
+import pygame
+import random
+import math
+from ..ai.neural_network import ColonistBrain, INPUT_SIZE
+from ..config import (COLONIST_SPEED, WORKING_AGE, RETIREMENT_AGE, 
+                     REPRODUCTION_AGE_MIN, REPRODUCTION_AGE_MAX, 
+                     BUILDING_TYPES, TILE_SIZE, MOVEMENT_SPEED,
+                     MARRIAGE_CHANCE, ANIMATION_SPEED, WALK_FRAMES)
+from .building import Building
+
+class Colonist:
+    def __init__(self, x, y, world):
+        self.x = x
+        self.y = y
+        self.world = world
+        self.brain = ColonistBrain()
+        
+        # Basic attributes
+        self.age = random.randint(18, 50)
+        self.gender = random.choice(['M', 'F'])
+        self.health = 100
+        self.energy = 100
+        self.money = 1000
+        self.happiness = 100
+        
+        # Visualization
+        self.color = (255, 200, 200) if self.gender == 'F' else (200, 200, 255)
+        self.size = 10
+        
+        # Animation state
+        self.animation_frame = 0
+        self.direction = 'right'  # right, left, up, down
+        self.is_walking = False
+        
+        # Resources
+        self.inventory = {
+            'food': 0,
+            'goods': 0,
+            'money': self.money
+        }
+        
+        # Leadership and skills
+        self.leadership = random.randint(0, 100)
+        self.construction_skill = random.randint(0, 100)
+        self.business_skill = random.randint(0, 100)
+        
+        # Building projects
+        self.current_project = None
+        self.project_progress = 0
+        
+        # Personality traits
+        self.traits = {
+            'ambition': random.randint(20, 100),
+            'sociability': random.randint(20, 100),
+            'intelligence': random.randint(20, 100),
+            'creativity': random.randint(20, 100),
+            'work_ethic': random.randint(20, 100),
+        }
+        
+        # Status
+        self.job = None
+        self.home = None
+        self.spouse = None
+        self.children = []
+        self.role = None  # leader, builder, worker, etc.
+        
+        # AI state
+        self.current_task = None
+        self.target_position = None
+        self.path = []
+        
+        # Relationships
+        self.relationships = {}
+        self.friends = []
+        self.enemies = []
+        
+        # Political views
+        self.political_alignment = random.random()  # 0 = conservative, 1 = progressive
+        self.voted_for = None
+
+    def update(self):
+        # Update relationships
+        self.update_relationships()
+        
+        # Get AI decision
+        state = self.get_state()
+        action = self.brain.decide_action(state)
+        
+        # Execute action with personality influence
+        self.execute_action(action)
+        
+        # Handle movement
+        self.move_towards_target()
+        
+        # Update animation
+        if self.is_walking:
+            self.animation_frame += ANIMATION_SPEED
+            if self.animation_frame >= WALK_FRAMES:
+                self.animation_frame = 0
+        
+        # Update basic needs and status
+        self.update_basic_needs()
+        self.update_happiness()
+        self.age += 0.0005  # Slower aging
+
+    def update_basic_needs(self):
+        """Update basic needs like energy, health, and resources"""
+        # Energy consumption
+        energy_loss = 0.1 * (2 - self.traits['work_ethic']/100)
+        self.energy -= energy_loss
+        if self.energy < 0:
+            self.health -= 0.1
+        
+        # Food consumption
+        if self.inventory['food'] > 0:
+            self.inventory['food'] -= 0.01
+            self.health = min(100, self.health + 0.1)
+        else:
+            self.health -= 0.05
+        
+        # Work and earn money
+        if self.job and WORKING_AGE <= self.age <= RETIREMENT_AGE:
+            efficiency = 1 + (self.traits['work_ethic'] - 50) / 100
+            earned = (self.job.salary / 30) * efficiency
+            self.money += earned
+            self.inventory['money'] = self.money
+
+    def consider_new_project(self):
+        """Consider starting a new building project based on colony needs"""
+        if self.money < 1000:  # Need minimum capital
+            return
+            
+        # Analyze colony needs
+        housing_needed = len([c for c in self.world.colonists if not c.home]) > 0
+        jobs_needed = len([c for c in self.world.colonists if not c.job]) > 0
+        food_needed = sum(c.inventory['food'] for c in self.world.colonists) < len(self.world.colonists) * 10
+        
+        possible_projects = []
+        
+        if housing_needed:
+            possible_projects.append(('house', 5))
+        if jobs_needed:
+            possible_projects.append(('shop', 3))
+            possible_projects.append(('factory', 4))
+        if food_needed:
+            possible_projects.append(('farm', 5))
+            
+        if possible_projects:
+            project_type, priority = max(possible_projects, key=lambda x: x[1])
+            if self.money >= BUILDING_TYPES[project_type]['cost']:
+                self.start_project(project_type)
+
+    def start_project(self, building_type):
+        """Start a new building project"""
+        # Find suitable location
+        x = random.randint(100, self.world.width - 100)
+        y = random.randint(100, self.world.height - 100)
+        
+        # Check if location is clear (simple check)
+        for building in self.world.buildings:
+            if ((building.x - x)**2 + (building.y - y)**2)**0.5 < 100:  # If location too close to other buildings
+                return  # Location too close to other buildings
+        
+        self.current_project = {
+            'type': building_type,
+            'x': x,
+            'y': y,
+            'progress': 0,
+            'required_progress': BUILDING_TYPES[building_type]['build_time']
+        }
+        self.target_position = (x, y)
+        self.money -= BUILDING_TYPES[building_type]['cost']
+        self.inventory['money'] = self.money
+
+    def update_project(self):
+        """Update current building project"""
+        if not self.current_project:
+            return
+            
+        # Need to be close to build
+        dx = self.current_project['x'] - self.x
+        dy = self.current_project['y'] - self.y
+        if (dx*dx + dy*dy) < 100:  # Within building range
+            # Progress based on construction skill
+            progress_rate = 0.5 + (self.construction_skill / 100)
+            self.current_project['progress'] += progress_rate
+            
+            # Complete project
+            if self.current_project['progress'] >= self.current_project['required_progress']:
+                self.world.create_building(
+                    self.current_project['type'],
+                    self.current_project['x'],
+                    self.current_project['y']
+                )
+                self.current_project = None
+                self.target_position = None
+
+    def move_towards_target(self):
+        """Move towards target position with grid-based movement"""
+        if not self.target_position and random.random() < 0.02:  # 2% chance to start random movement
+            self.random_movement()
+            
+        if self.target_position:
+            # Get current grid position
+            current_grid_x, current_grid_y = self.world.get_grid_position(self.x, self.y)
+            
+            # Calculate target grid position
+            target_x, target_y = self.target_position
+            target_grid_x, target_grid_y = self.world.get_grid_position(target_x, target_y)
+            
+            # Calculate grid-based movement
+            dx = target_grid_x - current_grid_x
+            dy = target_grid_y - current_grid_y
+            
+            if dx != 0 or dy != 0:
+                # Remove from current grid
+                self.world.remove_from_grid(self, current_grid_x, current_grid_y)
+                
+                # Determine movement direction
+                if abs(dx) > abs(dy):
+                    # Move horizontally
+                    move_x = 1 if dx > 0 else -1
+                    new_grid_x = current_grid_x + move_x
+                    new_grid_y = current_grid_y
+                    self.direction = 'right' if dx > 0 else 'left'
+                else:
+                    # Move vertically
+                    move_y = 1 if dy > 0 else -1
+                    new_grid_x = current_grid_x
+                    new_grid_y = current_grid_y + move_y
+                    self.direction = 'down' if dy > 0 else 'up'
+                
+                # Check if new position is valid
+                if (0 <= new_grid_x < self.world.current_size and 
+                    0 <= new_grid_y < self.world.current_size):
+                    
+                    # Convert to pixel coordinates
+                    new_pos = self.world.get_pixel_position(new_grid_x, new_grid_y)
+                    self.x = new_pos[0]
+                    self.y = new_pos[1]
+                    
+                    # Add to new grid position
+                    self.world.add_to_grid(self, new_grid_x, new_grid_y)
+                    self.is_walking = True
+                    
+                    # Update animation
+                    self.animation_frame += ANIMATION_SPEED
+                    if self.animation_frame >= WALK_FRAMES:
+                        self.animation_frame = 0
+                else:
+                    # Invalid position, stop movement
+                    self.target_position = None
+                    self.is_walking = False
+                    self.world.add_to_grid(self, current_grid_x, current_grid_y)
+            else:
+                # Reached target
+                self.target_position = None
+                self.is_walking = False
+
+    def random_movement(self):
+        """Generate random movement within the grid"""
+        if not self.target_position:
+            # Get current grid position
+            current_grid_x, current_grid_y = self.world.get_grid_position(self.x, self.y)
+            
+            # Choose random direction
+            directions = [(0,1), (1,0), (0,-1), (-1,0)]
+            dx, dy = random.choice(directions)
+            
+            new_grid_x = current_grid_x + dx
+            new_grid_y = current_grid_y + dy
+            
+            # Check if new position is valid
+            if (0 <= new_grid_x < self.world.current_size and 
+                0 <= new_grid_y < self.world.current_size):
+                
+                # Check if position is occupied by a building
+                occupants = self.world.get_grid_occupants(new_grid_x, new_grid_y)
+                if not any(isinstance(occupant, Building) for occupant in occupants):
+                    # Convert to pixel coordinates
+                    target_pos = self.world.get_pixel_position(new_grid_x, new_grid_y)
+                    self.target_position = target_pos
+
+    def seek_job(self):
+        """Find and move to an available job"""
+        available_jobs = self.world.get_available_jobs()
+        if available_jobs:
+            job = random.choice(available_jobs)
+            current_grid_x, current_grid_y = self.world.get_grid_position(self.x, self.y)
+            job_grid_x, job_grid_y = self.world.get_grid_position(job.x, job.y)
+            
+            # Find walkable position near job
+            for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
+                target_x = job_grid_x + dx
+                target_y = job_grid_y + dy
+                
+                if (0 <= target_x < self.world.current_size and 
+                    0 <= target_y < self.world.current_size):
+                    
+                    # Remove from current position
+                    self.world.remove_from_grid(self, current_grid_x, current_grid_y)
+                    
+                    # Move to new position
+                    target_pos = self.world.get_pixel_position(target_x, target_y)
+                    self.target_position = target_pos
+                    
+                    # Add to new position
+                    self.world.add_to_grid(self, target_x, target_y)
+                    
+                    # Assign job
+                    self.job = job
+                    job.employee = self
+                    break
+
+    def seek_home(self):
+        """Find and move to an available home"""
+        available_homes = self.world.get_available_homes()
+        if available_homes:
+            home = random.choice(available_homes)
+            current_grid_x, current_grid_y = self.world.get_grid_position(self.x, self.y)
+            home_grid_x, home_grid_y = self.world.get_grid_position(home.x, home.y)
+            
+            # Find walkable position near home
+            for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
+                target_x = home_grid_x + dx
+                target_y = home_grid_y + dy
+                
+                if (0 <= target_x < self.world.current_size and 
+                    0 <= target_y < self.world.current_size):
+                    
+                    # Remove from current position
+                    self.world.remove_from_grid(self, current_grid_x, current_grid_y)
+                    
+                    # Move to new position
+                    target_pos = self.world.get_pixel_position(target_x, target_y)
+                    self.target_position = target_pos
+                    
+                    # Add to new position
+                    self.world.add_to_grid(self, target_x, target_y)
+                    
+                    # Assign home
+                    self.home = home
+                    home.current_occupants += 1
+                    break
+
+    def seek_social_interaction(self):
+        """Move towards other colonists"""
+        current_grid_x, current_grid_y = self.world.get_grid_position(self.x, self.y)
+        range_tiles = 5
+        
+        # Find nearby colonists
+        nearby_colonists = []
+        for dx in range(-range_tiles, range_tiles + 1):
+            for dy in range(-range_tiles, range_tiles + 1):
+                check_x = current_grid_x + dx
+                check_y = current_grid_y + dy
+                if (0 <= check_x < self.world.current_size and 
+                    0 <= check_y < self.world.current_size):
+                    occupants = self.world.get_grid_occupants(check_x, check_y)
+                    nearby_colonists.extend([o for o in occupants 
+                                          if isinstance(o, Colonist) and o != self])
+        
+        if nearby_colonists:
+            target = random.choice(nearby_colonists)
+            target_grid_x, target_grid_y = self.world.get_grid_position(target.x, target.y)
+            
+            # Find nearby empty tile
+            for dx, dy in [(0,0), (0,1), (1,0), (0,-1), (-1,0)]:
+                check_x = target_grid_x + dx
+                check_y = target_grid_y + dy
+                if (0 <= check_x < self.world.current_size and 
+                    0 <= check_y < self.world.current_size):
+                    occupants = self.world.get_grid_occupants(check_x, check_y)
+                    if not any(isinstance(occupant, Building) for occupant in occupants):
+                        self.target_position = self.world.get_pixel_position(check_x, check_y)
+                        break
+
+    def seek_partner(self):
+        """Find and move towards a potential partner"""
+        potential_partners = self.world.get_potential_partners(self)
+        if potential_partners:
+            target = random.choice(potential_partners)
+            target_grid_x, target_grid_y = self.world.get_grid_position(target.x, target.y)
+            
+            # Find nearby empty tile
+            for dx, dy in [(0,0), (0,1), (1,0), (0,-1), (-1,0)]:
+                check_x = target_grid_x + dx
+                check_y = target_grid_y + dy
+                if (0 <= check_x < self.world.current_size and 
+                    0 <= check_y < self.world.current_size):
+                    occupants = self.world.get_grid_occupants(check_x, check_y)
+                    if not any(isinstance(occupant, Building) for occupant in occupants):
+                        self.target_position = self.world.get_pixel_position(check_x, check_y)
+                        
+                        # Attempt to form partnership with increased chance
+                        if random.random() < MARRIAGE_CHANCE:
+                            self.spouse = target
+                            target.spouse = self
+                            # Boost happiness for new couple
+                            self.happiness += 20
+                            target.happiness += 20
+                        break
+
+    def render(self, screen, camera_x=0, camera_y=0, zoom=1.0):
+        """Render colonist with walking animation"""
+        # Calculate screen position
+        screen_x = int((self.x + camera_x) * zoom)
+        screen_y = int((self.y + camera_y) * zoom)
+        size = int(10 * zoom)  # Base size
+        
+        # Draw body
+        color = (255, 200, 200) if self.gender == 'F' else (200, 200, 255)
+        pygame.draw.circle(screen, color, (screen_x, screen_y), size)
+        
+        # Draw walking animation
+        if self.is_walking:
+            leg_offset = abs(math.sin(self.animation_frame * math.pi)) * 3 * zoom
+            if self.direction in ['left', 'right']:
+                # Draw legs
+                pygame.draw.line(screen, color,
+                               (screen_x, screen_y + size),
+                               (screen_x - leg_offset, screen_y + size + 5 * zoom), 
+                               max(1, int(2 * zoom)))
+                pygame.draw.line(screen, color,
+                               (screen_x, screen_y + size),
+                               (screen_x + leg_offset, screen_y + size + 5 * zoom),
+                               max(1, int(2 * zoom)))
+            else:
+                # Draw legs for up/down movement
+                pygame.draw.line(screen, color,
+                               (screen_x - 2 * zoom, screen_y + size),
+                               (screen_x - 2 * zoom, screen_y + size + leg_offset),
+                               max(1, int(2 * zoom)))
+                pygame.draw.line(screen, color,
+                               (screen_x + 2 * zoom, screen_y + size),
+                               (screen_x + 2 * zoom, screen_y + size - leg_offset),
+                               max(1, int(2 * zoom)))
+        
+        # Draw current activity indicator
+        if self.current_task:
+            indicator_color = {
+                'working': (255, 255, 0),
+                'building': (255, 128, 0),
+                'shopping': (0, 255, 255),
+                'socializing': (255, 192, 203)
+            }.get(self.current_task, (255, 255, 255))
+            pygame.draw.circle(screen, indicator_color,
+                             (screen_x, screen_y - size - 3 * zoom),
+                             max(2, int(3 * zoom)))
+        
+        # Draw relationship indicators
+        if self.spouse:
+            # Draw heart for married colonists
+            pygame.draw.circle(screen, (255, 0, 0),
+                             (screen_x, screen_y - size - 8 * zoom),
+                             max(2, int(3 * zoom)))
+
+    def get_state(self):
+        """Get current state for AI input"""
+        basic_state = [
+            self.x / self.world.width,  # Normalized position
+            self.y / self.world.height,
+            self.age / 100,  # Normalized age
+            self.health / 100,
+            self.energy / 100,
+            self.money / 10000,  # Normalized money
+            self.happiness / 100,
+            1 if self.job else 0,
+            1 if self.home else 0,
+            1 if self.spouse else 0,
+            len(self.children) / 5,  # Normalized number of children
+        ]
+        
+        # Add personality traits
+        trait_state = [trait_value / 100 for trait_value in self.traits.values()]
+        
+        # Add social state
+        social_state = [
+            len(self.friends) / 10,  # Normalized number of friends
+            len(self.enemies) / 10,  # Normalized number of enemies
+            sum(self.relationships.values()) / (len(self.relationships) * 100) if self.relationships else 0,  # Average relationship strength
+        ]
+        
+        # Add environmental state
+        env_state = [
+            len(self.world.get_available_jobs()) / 20,  # Normalized available jobs
+            len(self.world.get_available_homes()) / 20,  # Normalized available homes
+            self.world.treasury / 100000,  # Normalized treasury
+        ]
+        
+        return basic_state + trait_state + social_state + env_state
+
+    def update_relationships(self):
+        """Update relationships with other colonists"""
+        for other in self.world.colonists:
+            if other != self:
+                # Initialize relationship if not exists
+                if other not in self.relationships:
+                    compatibility = self.calculate_compatibility(other)
+                    self.relationships[other] = compatibility
+                
+                # Update relationship based on proximity and interaction
+                if ((self.x - other.x)**2 + (self.y - other.y)**2)**0.5 < 50:  # If colonists are close
+                    change = random.randint(-2, 2)
+                    self.relationships[other] = max(-100, min(100, self.relationships[other] + change))
+                    
+                    # Update friends and enemies
+                    if self.relationships[other] > 50 and other not in self.friends:
+                        self.friends.append(other)
+                    elif self.relationships[other] < -50 and other not in self.enemies:
+                        self.enemies.append(other)
+
+    def calculate_compatibility(self, other):
+        """Calculate initial compatibility with another colonist"""
+        trait_diff = sum(abs(self.traits[t] - other.traits[t]) for t in self.traits)
+        base_compatibility = 100 - trait_diff/len(self.traits)
+        return base_compatibility + random.randint(-20, 20)
+
+    def update_happiness(self):
+        """Update happiness based on personality and situation"""
+        # Base happiness affected by basic needs
+        base_happiness = (self.health + self.energy) / 2
+        
+        # Social happiness based on personality
+        social_factor = (len(self.friends) * 10 - len(self.enemies) * 15) * (self.traits['sociability'] / 100)
+        
+        # Work happiness based on personality
+        work_factor = 0
+        if self.job:
+            work_factor = 20 * (self.traits['ambition'] / 100)
+        else:
+            work_factor = -20 * (self.traits['ambition'] / 100)
+        
+        # Money happiness based on personality
+        money_factor = (self.money / 1000) * (self.traits['ambition'] / 100)
+        
+        self.happiness = max(0, min(100, base_happiness + social_factor + work_factor + money_factor))
+
+    def execute_action(self, action):
+        """Execute the action chosen by the AI"""
+        if action == 0:  # Find job
+            if not self.job and WORKING_AGE <= self.age <= RETIREMENT_AGE:
+                self.seek_job()
+        elif action == 1:  # Find home
+            if not self.home:
+                self.seek_home()
+        elif action == 2:  # Rest
+            if self.home:
+                self.target_position = (self.home.x, self.home.y)
+                self.energy = min(100, self.energy + 10)
+        elif action == 3:  # Work
+            if self.job:
+                self.target_position = (self.job.x, self.job.y)
+        elif action == 4:  # Seek partner
+            if not self.spouse and REPRODUCTION_AGE_MIN <= self.age <= REPRODUCTION_AGE_MAX:
+                self.seek_partner()
+        elif action == 5:  # Random movement
+            self.random_movement()
+        elif action == 6:  # Socialize
+            self.seek_social_interaction()
+        elif action == 7:  # Visit shop
+            self.visit_nearest_shop()
+
+    def visit_nearest_shop(self):
+        """Find and move to the nearest shop"""
+        shops = [b for b in self.world.buildings if b.building_type == 'shop']
+        if shops:
+            # Find nearest shop
+            nearest_shop = min(shops, key=lambda b: ((b.x - self.x)**2 + (b.y - self.y)**2)**0.5)
+            self.target_position = (nearest_shop.x, nearest_shop.y)

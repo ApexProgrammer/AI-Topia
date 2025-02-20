@@ -49,7 +49,8 @@ class UI:
             'policies': Button(10, button_y, 100, button_height, 'Policies', (150, 150, 200)),
             'election': Button(120, button_y, 100, button_height, 'Elections', (200, 150, 150)),
             'taxes': Button(230, button_y, 100, button_height, 'Taxes', (150, 200, 150)),
-            'laws': Button(340, button_y, 100, button_height, 'Laws', (200, 200, 150))
+            'laws': Button(340, button_y, 100, button_height, 'Laws', (200, 200, 150)),
+            'scenario': Button(450, button_y, 100, button_height, 'Scenario', (200, 200, 200))  # new button
         }
         
         # Policy and law settings
@@ -110,6 +111,11 @@ class UI:
                         self.law_menu_open = not self.law_menu_open
                         self.policy_menu_open = False
                         self.show_election_info = False
+                    elif button_type == 'scenario':
+                        # Manually trigger a new scenario if one is not active
+                        if not self.world.scenario_manager.active_scenario:
+                            self.world.scenario_manager.trigger_scenario()
+                        return
                     return
             
             # Handle policy adjustments
@@ -144,6 +150,14 @@ class UI:
                 self.target_zoom = min(2.0, self.zoom + 0.2)
             elif event.key == pygame.K_MINUS:
                 self.target_zoom = max(0.5, self.zoom - 0.2)
+            
+            # If a scenario is active, allow decisions via number keys
+            if self.world.scenario_manager.active_scenario:
+                if event.key == pygame.K_1:
+                    self.world.scenario_manager.choose_option(0)
+                elif event.key == pygame.K_2:
+                    self.world.scenario_manager.choose_option(1)
+                # Add additional keys if more options are added
         
         elif event.type == pygame.KEYUP:
             if event.key in self.keys_pressed:
@@ -241,6 +255,7 @@ class UI:
         # Draw stats
         stats_y = 50
         stats = [
+            f"Score:",
             f"Population: {len(self.world.colonists)}",
             f"Treasury: ${self.world.treasury:,.2f}",
             f"GDP: ${self.world.gdp:,.2f}",
@@ -283,6 +298,10 @@ class UI:
             self.draw_election_info()
         if self.show_colonist_info and self.selected_colonist:
             self.draw_colonist_info()
+        
+        # Render scenario overlay if active
+        if self.world.scenario_manager.active_scenario:
+            self.world.scenario_manager.render(self.screen, self.font)
 
     def get_average_happiness(self):
         if not self.world.colonists:

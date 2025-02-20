@@ -11,6 +11,7 @@ from .config import (TILE_SIZE, INITIAL_MAP_SIZE, EXPANSION_BUFFER, MIN_MAP_SIZE
                     INITIAL_COLONISTS, CONSTRUCTION_SKILL_THRESHOLD,
                     MIN_MONEY_FOR_BUILDING, BUILDING_CHANCE, TAX_RATE, INTEREST_RATE,
                     INITIAL_TREASURY)
+from .scenario import ScenarioManager  # new import
 
 class World:
     def __init__(self, screen_width=None, screen_height=None):
@@ -40,6 +41,10 @@ class World:
         
         # Initialize state
         self.treasury = INITIAL_TREASURY
+        # New scoring attribute for decisions and outcomes
+        self.score = 0  
+        # New scenario manager for ethical challenges
+        self.scenario_manager = ScenarioManager(self)
         self.gdp = 0
         self.leader = None
         self.election_timer = 0
@@ -315,6 +320,9 @@ class World:
         for colonist in self.colonists:
             if colonist.money >= MIN_MONEY_FOR_BUILDING and not colonist.current_task:
                 self.consider_autonomous_building(colonist)
+
+        # New: Update scenario manager for ethical challenge events
+        self.scenario_manager.update()
 
     def update_economy(self):
         """Update the colony's economy"""

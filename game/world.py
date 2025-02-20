@@ -1,5 +1,6 @@
 import pygame
 import random
+import math  # added import
 from .entities.colonist import Colonist
 from .entities.building import Building
 from .config import (TILE_SIZE, INITIAL_MAP_SIZE, EXPANSION_BUFFER, MIN_MAP_SIZE,
@@ -13,7 +14,8 @@ from .config import (TILE_SIZE, INITIAL_MAP_SIZE, EXPANSION_BUFFER, MIN_MAP_SIZE
 
 class World:
     def __init__(self, screen_width=None, screen_height=None):
-        self.current_size = INITIAL_MAP_SIZE
+        # Automatically update grid size based on number of colonists.
+        self.current_size = max(INITIAL_MAP_SIZE, math.ceil(math.sqrt(INITIAL_COLONISTS)) * 2)  # changed line
         self.width = self.current_size * TILE_SIZE
         self.height = self.current_size * TILE_SIZE
         self.ui = None
@@ -285,9 +287,15 @@ class World:
             colonist.render(screen, camera_x, camera_y, zoom)
 
     def update(self):
-        # Update colonists
+        # New: Get simulation speed multiplier from UI if available
+        if self.ui and hasattr(self.ui, 'simulation_speed_options'):
+            speed_multiplier = self.ui.simulation_speed_options[self.ui.simulation_speed]
+        else:
+            speed_multiplier = 1.0
+
+        # Update colonists with simulation speed multiplier
         for colonist in self.colonists:
-            colonist.update()
+            colonist.update(speed_multiplier)  # Updated call with multiplier
         
         # Update buildings
         for building in self.buildings:
@@ -298,6 +306,15 @@ class World:
         self.update_government()
         self.handle_reproduction()
         self.handle_deaths()
+        
+        # New: Check and perform map expansion if needed
+        if self.check_expansion_needed():
+            self.expand_map()
+        
+        # New: Let colonists attempt autonomous building if they have enough funds
+        for colonist in self.colonists:
+            if colonist.money >= MIN_MONEY_FOR_BUILDING and not colonist.current_task:
+                self.consider_autonomous_building(colonist)
 
     def update_economy(self):
         """Update the colony's economy"""
@@ -458,33 +475,23 @@ class World:
                 if current_time - last_birth_time < 10000:
                     continue
                 
-                # Calculate birth probability based on:
-                # 1. Base chance
-                # 2. Health and happiness
-                # 3. Economic situation
-                # 4. Government policies
-                
+                # Calculate birth probability based on multiple factors.
                 health_factor = (colonist.health + colonist.spouse.health) / 200
                 happiness_factor = (colonist.happiness + colonist.spouse.happiness) / 200
                 economic_factor = min(1.0, (colonist.money + colonist.spouse.money) / 5000)
                 
-                # Policy effects
                 policy_factor = 1.0
                 if self.ui and self.ui.policies['birth_incentive'] > 0:
                     policy_factor += self.ui.policies['birth_incentive'] / 1000
                 
-                birth_chance = (0.01 * 
-                              health_factor * 
-                              happiness_factor * 
-                              economic_factor * 
-                              policy_factor)
+                # Multiply base chance by a factor scaling with population size
+                birth_chance = (0.01 * health_factor * happiness_factor * economic_factor * policy_factor) * (1 + len(self.colonists) / 100)
                 
                 if random.random() < birth_chance:
                     # Create new colonist
                     x, y = colonist.x, colonist.y
                     child = Colonist(x, y, self)
                     child.age = 0
-                    
                     # Inherit traits from parents
                     for trait in child.traits:
                         child.traits[trait] = (
@@ -493,32 +500,25 @@ class World:
                             random.randint(-10, 10)
                         )
                         child.traits[trait] = max(0, min(100, child.traits[trait]))
-                    
-                    # Political alignment influenced by parents
                     child.political_alignment = (
                         colonist.political_alignment * 0.4 +
                         colonist.spouse.political_alignment * 0.4 +
                         random.random() * 0.2
                     )
-                    
                     # Add to world
                     self.colonists.append(child)
                     colonist.children.append(child)
                     colonist.spouse.children.append(child)
-                    
                     # Record birth
                     self.birth_history.append({
                         'time': current_time,
                         'child': child,
                         'parents': (colonist, colonist.spouse)
                     })
-                    
                     # Apply birth incentive
                     if self.ui and self.ui.policies['birth_incentive'] > 0:
                         colonist.money += self.ui.policies['birth_incentive']
                         colonist.inventory['money'] = colonist.money
-                    
-                    # Update grid position
                     grid_x, grid_y = self.get_grid_position(x, y)
                     self.add_to_grid(child, grid_x, grid_y)
 
@@ -610,27 +610,18 @@ class World:
                 building_density > BUILDINGS_PER_TILE)
 
     def expand_map(self):
-        """Expand the map size"""
-        if self.current_size >= MAX_MAP_SIZE:
-            return False
-            
-        if self.treasury < EXPANSION_COST:
-            return False
-            
+        """Expand the map size without limitations so the colony advances continuously"""
         old_size = self.current_size
         self.current_size += EXPANSION_BUFFER
         self.width = self.current_size * TILE_SIZE
         self.height = self.current_size * TILE_SIZE
         
-        # Record expansion
+        # Record expansion (cost removed)
         self.expansion_history.append({
             'time': pygame.time.get_ticks(),
             'old_size': old_size,
-            'new_size': self.current_size,
-            'cost': EXPANSION_COST
+            'new_size': self.current_size
         })
-        
-        self.treasury -= EXPANSION_COST
         return True
 
     def set_ui(self, ui):

@@ -4,6 +4,8 @@ from game.world import World
 from game.ui import UI
 from game.config import FPS, TITLE
 
+import menu  # use the refactored menu
+
 class Game:
     def __init__(self):
         pygame.init()
@@ -46,6 +48,9 @@ class Game:
         pygame.display.flip()
 
     def run(self):
+        # Transition from menu to game in the same pygame instance
+        menu.run_menu(self.screen)
+        
         while self.running:
             self.handle_events()
             self.update()

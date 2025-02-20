@@ -78,7 +78,7 @@ class Colonist:
         self.political_alignment = random.random()  # 0 = conservative, 1 = progressive
         self.voted_for = None
 
-    def update(self):
+    def update(self, speed_multiplier=1.0):
         # Update relationships
         self.update_relationships()
         
@@ -94,38 +94,38 @@ class Colonist:
         
         # Update animation
         if self.is_walking:
-            self.animation_frame += ANIMATION_SPEED
+            self.animation_frame += ANIMATION_SPEED * speed_multiplier
             if self.animation_frame >= WALK_FRAMES:
                 self.animation_frame = 0
         
         # Update basic needs and status
-        self.update_basic_needs()
+        self.update_basic_needs(speed_multiplier)
         self.update_happiness()
-        self.age += 0.0005  # Slower aging
+        self.age += 0.0005 * speed_multiplier  # Scale aging
 
-    def update_basic_needs(self):
+    def update_basic_needs(self, speed_multiplier=1.0):
         """Update basic needs like energy, health, and resources"""
         # Energy consumption based on work ethic and activity
-        base_energy_loss = RESOURCE_CONSUMPTION_RATE * (2 - self.traits['work_ethic']/100)
+        base_energy_loss = RESOURCE_CONSUMPTION_RATE * (2 - self.traits['work_ethic']/100) * speed_multiplier
         if self.is_walking:
             base_energy_loss *= 1.5
         self.energy = max(0, min(100, self.energy - base_energy_loss))
         
         # Health regeneration when resting
         if self.energy > 50:
-            self.health = min(100, self.health + 0.05)
+            self.health = min(100, self.health + (0.05 * speed_multiplier))
         elif self.energy < 20:
-            self.health = max(0, self.health - 0.02)
+            self.health = max(0, self.health - (0.02 * speed_multiplier))
         
         # Food consumption and effects
         if self.inventory['food'] > 0:
-            food_consumed = RESOURCE_CONSUMPTION_RATE
+            food_consumed = RESOURCE_CONSUMPTION_RATE * speed_multiplier
             self.inventory['food'] = max(0, self.inventory['food'] - food_consumed)
-            self.health = min(100, self.health + 0.1)
-            self.energy = min(100, self.energy + 0.2)
+            self.health = min(100, self.health + (0.1 * speed_multiplier))
+            self.energy = min(100, self.energy + (0.2 * speed_multiplier))
         else:
-            self.health = max(0, self.health - 0.05)
-            self.energy = max(0, self.energy - 0.1)
+            self.health = max(0, self.health - (0.05 * speed_multiplier))
+            self.energy = max(0, self.energy - (0.1 * speed_multiplier))
         
         # Work and earn money
         if self.job and WORKING_AGE <= self.age <= RETIREMENT_AGE:

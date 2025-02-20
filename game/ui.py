@@ -171,11 +171,11 @@ class UI:
                 # Adjust minimum wage with +/- buttons
                 if menu_x + 200 <= mouse_pos[0] <= menu_x + 220 and y <= mouse_pos[1] <= y + 25:
                     self.policies[policy] = min(20, self.policies[policy] + 0.5)
-                elif menu_x + 230 <= mouse_pos[0] <= menu_x + 250 and y <= mouse_pos[1] <= y + 25:
+                elif menu_x + 230 <= mouse_pos[0] <= mouse_x + 250 and y <= mouse_pos[1] <= y + 25:
                     self.policies[policy] = max(5, self.policies[policy] - 0.5)
             elif policy == 'birth_incentive':
                 # Adjust birth incentive with +/- buttons
-                if menu_x + 200 <= mouse_pos[0] <= menu_x + 220 and y <= mouse_pos[1] <= y + 25:
+                if menu_x + 200 <= mouse_pos[0] <= mouse_x + 220 and y <= mouse_pos[1] <= y + 25:
                     self.policies[policy] = min(500, self.policies[policy] + 25)
                 elif menu_x + 230 <= mouse_pos[0] <= menu_x + 250 and y <= mouse_pos[1] <= y + 25:
                     self.policies[policy] = max(0, self.policies[policy] - 25)

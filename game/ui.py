@@ -70,6 +70,19 @@ class UI:
             'birth_incentive': 100  # Money given for each new child
         }
         
+        # Enhanced policy ranges with step sizes and display formats
+        self.policy_ranges = {
+            'tax_rate': {'min': 0.05, 'max': 0.5, 'step': 0.01, 'format': '{:.0%}'},
+            'minimum_wage': {'min': 5, 'max': 20, 'step': 0.5, 'format': '${:.2f}/hr'},
+            'birth_incentive': {'min': 0, 'max': 500, 'step': 25, 'format': '${:.0f}'},
+            'retirement_age': {'min': 55, 'max': 75, 'step': 1, 'format': '{:.0f} years'}
+        }
+        
+        # Add visual feedback state for active controls
+        self.active_slider = None
+        self.slider_drag = False
+        self.hover_item = None
+        
         self.laws = {
             'mandatory_education': True,
             'universal_healthcare': True,
@@ -170,36 +183,36 @@ class UI:
                 self.keys_pressed[event.key] = False
 
     def handle_policy_click(self, mouse_pos):
-        """Handle clicks in the policy menu"""
+        """Enhanced policy interaction handling"""
         menu_x = self.screen.get_width() - 310
         menu_y = 10
-        
-        # Calculate click positions for policy adjustments
         y = menu_y + 20
+        
         for policy, value in self.policies.items():
             if isinstance(value, bool):
-                # Toggle boolean policies
-                if menu_x + 10 <= mouse_pos[0] <= menu_x + 290 and y <= mouse_pos[1] <= y + 25:
+                # Handle toggle clicks
+                toggle_rect = pygame.Rect(menu_x + 10, y, 250, 20)
+                if toggle_rect.collidepoint(mouse_pos):
                     self.policies[policy] = not value
-            elif policy == 'tax_rate':
-                # Adjust tax rate with +/- buttons
-                if menu_x + 200 <= mouse_pos[0] <= menu_x + 220 and y <= mouse_pos[1] <= y + 25:
-                    self.policies[policy] = min(0.5, self.policies[policy] + 0.01)
-                elif menu_x + 230 <= mouse_pos[0] <= menu_x + 250 and y <= mouse_pos[1] <= y + 25:
-                    self.policies[policy] = max(0.05, self.policies[policy] - 0.01)
-            elif policy == 'minimum_wage':
-                # Adjust minimum wage with +/- buttons
-                if menu_x + 200 <= mouse_pos[0] <= menu_x + 220 and y <= mouse_pos[1] <= y + 25:
-                    self.policies[policy] = min(20, self.policies[policy] + 0.5)
-                elif menu_x + 230 <= mouse_pos[0] <= mouse_x + 250 and y <= mouse_pos[1] <= y + 25:
-                    self.policies[policy] = max(5, self.policies[policy] - 0.5)
-            elif policy == 'birth_incentive':
-                # Adjust birth incentive with +/- buttons
-                if menu_x + 200 <= mouse_pos[0] <= mouse_x + 220 and y <= mouse_pos[1] <= y + 25:
-                    self.policies[policy] = min(500, self.policies[policy] + 25)
-                elif menu_x + 230 <= mouse_pos[0] <= menu_x + 250 and y <= mouse_pos[1] <= y + 25:
-                    self.policies[policy] = max(0, self.policies[policy] - 25)
-            y += 30
+            
+            elif policy in self.policy_ranges:
+                # Handle slider interaction
+                slider_rect = pygame.Rect(menu_x + 10, y + 25, 200, 20)
+                if slider_rect.collidepoint(mouse_pos):
+                    range_info = self.policy_ranges[policy]
+                    # Calculate value from click position
+                    ratio = (mouse_pos[0] - (menu_x + 10)) / 200
+                    new_value = range_info['min'] + (range_info['max'] - range_info['min']) * ratio
+                    # Round to nearest step
+                    steps = round((new_value - range_info['min']) / range_info['step'])
+                    new_value = range_info['min'] + steps * range_info['step']
+                    # Clamp value
+                    new_value = max(range_info['min'], min(range_info['max'], new_value))
+                    self.policies[policy] = new_value
+                    self.active_slider = (menu_x + 10, y + 25)
+                    self.slider_drag = True
+            
+            y += 60  # Increased spacing for improved layout
 
     def handle_law_click(self, mouse_pos):
         """Handle clicks in the law menu"""
@@ -363,34 +376,87 @@ class UI:
         return (term_length - elapsed) // 60  # Convert to days
 
     def draw_policy_menu(self):
+        """Enhanced policy menu with improved visual feedback"""
         menu_x = self.screen.get_width() - 310
         menu_y = 10
         width = 300
-        height = 400
+        height = len(self.policies) * 60 + 20  # Adjusted for new spacing
         
-        # Draw background
+        # Draw background panel
         s = pygame.Surface((width, height))
-        s.set_alpha(200)
-        s.fill((50, 50, 50))
+        s.set_alpha(230)  # More opaque
+        s.fill((40, 40, 50))  # Slightly blue tint
         self.screen.blit(s, (menu_x, menu_y))
+        pygame.draw.rect(self.screen, (100, 100, 150), (menu_x, menu_y, width, height), 1)
         
-        # Draw policy options with sliders/toggles
-        y = menu_y + 20
+        # Draw title
+        title = self.font.render("Policy Settings", True, (200, 200, 255))
+        self.screen.blit(title, (menu_x + 10, menu_y + 10))
+        
+        y = menu_y + 40
         for policy, value in self.policies.items():
-            if isinstance(value, bool):
-                text = f"{policy.replace('_', ' ').title()}: {'On' if value else 'Off'}"
-            elif policy == 'tax_rate':
-                text = f"Tax Rate: {value*100:.1f}%"
-            elif policy == 'minimum_wage':
-                text = f"Minimum Wage: ${value:.2f}/hr"
-            elif policy == 'birth_incentive':
-                text = f"Birth Incentive: ${value}"
-            else:
-                text = f"{policy.replace('_', ' ').title()}: {value}"
+            # Draw policy name
+            name = policy.replace('_', ' ').title()
+            text = self.font.render(name, True, (255, 255, 255))
+            self.screen.blit(text, (menu_x + 10, y))
             
-            text_surface = self.font.render(text, True, (255, 255, 255))
-            self.screen.blit(text_surface, (menu_x + 10, y))
-            y += 30
+            if isinstance(value, bool):
+                # Draw toggle switch
+                self.draw_toggle(menu_x + 10, y + 25, value, "")
+            else:
+                # Draw slider with current value
+                range_info = self.policy_ranges.get(policy, {'min': 0, 'max': 100, 'step': 1, 'format': '{:.0f}'})
+                self.draw_slider(menu_x + 10, y + 25, 200, 20, value, range_info)
+                
+                # Draw current value
+                value_text = range_info['format'].format(value)
+                text = self.font.render(value_text, True, (200, 200, 255))
+                self.screen.blit(text, (menu_x + 220, y + 25))
+            
+            y += 60
+
+    def draw_slider(self, x, y, width, height, value, range_info):
+        """Draw an improved slider with better visual feedback"""
+        # Draw track
+        track_rect = pygame.Rect(x, y + height//2 - 2, width, 4)
+        pygame.draw.rect(self.screen, (100, 100, 100), track_rect)
+        pygame.draw.rect(self.screen, (150, 150, 150), track_rect, 1)
+        
+        # Calculate knob position
+        value_ratio = (value - range_info['min']) / (range_info['max'] - range_info['min'])
+        knob_x = x + (width * value_ratio)
+        knob_pos = (int(knob_x), y + height//2)
+        
+        # Draw filled portion
+        filled_rect = pygame.Rect(x, y + height//2 - 2, knob_x - x, 4)
+        pygame.draw.rect(self.screen, (100, 150, 255), filled_rect)
+        
+        # Draw knob with hover/active state
+        knob_color = (200, 200, 255) if self.active_slider == (x,y) else (150, 150, 255)
+        pygame.draw.circle(self.screen, knob_color, knob_pos, 8)
+        pygame.draw.circle(self.screen, (255, 255, 255), knob_pos, 8, 1)
+        
+        return knob_pos, 8  # Return knob position and radius for hit testing
+
+    def draw_toggle(self, x, y, value, text):
+        """Draw a toggle switch for boolean settings"""
+        width = 40
+        height = 20
+        toggle_rect = pygame.Rect(x, y, width, height)
+        
+        # Draw track
+        pygame.draw.rect(self.screen, (50,50,50), toggle_rect, border_radius=height//2)
+        pygame.draw.rect(self.screen, (100,100,100), toggle_rect, 1, border_radius=height//2)
+        
+        # Draw knob
+        knob_pos = x + width - 15 if value else x + 5
+        pygame.draw.circle(self.screen, (150,150,255) if value else (100,100,100), (knob_pos, y + height//2), height//2 - 2)
+        
+        # Draw label
+        label = self.font.render(f"{text}: {'On' if value else 'Off'}", True, (255,255,255))
+        self.screen.blit(label, (x + width + 10, y + 2))
+        
+        return pygame.Rect(x, y, width + 10 + label.get_width(), height)
 
     def draw_law_menu(self):
         menu_x = self.screen.get_width() - 310

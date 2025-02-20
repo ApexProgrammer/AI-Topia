@@ -1,4 +1,4 @@
-import sys, subprocess, pygame
+import sys, subprocess, pygame, importlib  # added importlib
 import game.config as config  # Adjust config dynamically
 
 pygame.init()
@@ -14,17 +14,17 @@ def run_menu(screen):
 
     # Reorder menu items to put START GAME first
     options = [
-        {"name": "INITIAL COLONISTS", "value": config.INITIAL_COLONISTS, "min": 50, "max": 500, "step": 10},
-        {"name": "TILE SIZE", "value": config.TILE_SIZE, "min": 16, "max": 64, "step": 4}
+        {"name": "INITIAL_COLONISTS", "display": "INITIAL COLONISTS", "value": config.INITIAL_COLONISTS, "min": 50, "max": 500, "step": 10},
+        {"name": "TILE_SIZE", "display": "TILE SIZE", "value": config.TILE_SIZE, "min": 16, "max": 64, "step": 4}
     ]
-    menu_items = ["START GAME"] + [opt["name"] for opt in options]
+    menu_items = ["START GAME"] + [opt["display"] for opt in options]
     selected_index = 0
     running = True
 
     def handle_mouse_click(pos):
         for i, item in enumerate(menu_items):
             y_position = 180 + i * 70
-            text = item if item == "START GAME" else f"{item}: {next(o for o in options if o['name'] == item)['value']}"
+            text = item if item == "START GAME" else f"{item}: {next(o for o in options if o['display'] == item)['value']}"
             
             # Calculate button dimensions
             rendered = font.render(text, True, (255, 255, 255))
@@ -58,7 +58,7 @@ def run_menu(screen):
             if item == "START GAME":
                 text = item
             else:
-                opt = next(o for o in options if o["name"] == item)
+                opt = next(o for o in options if o["display"] == item)
                 text = f"{item}: {opt['value']}"
             
             # Calculate required button width based on text
@@ -100,9 +100,9 @@ def run_menu(screen):
                     if clicked_index is not None:
                         selected_index = clicked_index
                         if menu_items[selected_index] == "START GAME":
-                            # Update configuration constants dynamically
                             for opt in options:
                                 setattr(config, opt["name"], opt["value"])
+                            importlib.reload(config)  # force reload to apply updated values
                             running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_DOWN:
@@ -111,17 +111,17 @@ def run_menu(screen):
                     selected_index = (selected_index - 1) % len(menu_items)
                 elif event.key == pygame.K_LEFT:
                     if menu_items[selected_index] != "START GAME":
-                        opt = next(o for o in options if o["name"] == menu_items[selected_index])
+                        opt = next(o for o in options if o["display"] == menu_items[selected_index])
                         opt["value"] = max(opt["min"], opt["value"] - opt["step"])
                 elif event.key == pygame.K_RIGHT:
                     if menu_items[selected_index] != "START GAME":
-                        opt = next(o for o in options if o["name"] == menu_items[selected_index])
+                        opt = next(o for o in options if o["display"] == menu_items[selected_index])
                         opt["value"] = min(opt["max"], opt["value"] + opt["step"])
                 elif event.key == pygame.K_RETURN:
                     if menu_items[selected_index] == "START GAME":
-                        # Update configuration constants dynamically
                         for opt in options:
                             setattr(config, opt["name"], opt["value"])
+                        importlib.reload(config)  # force reload to apply updated values
                         running = False
 
         # Handle mouse hover for visual feedback

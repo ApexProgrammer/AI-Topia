@@ -8,15 +8,15 @@ from .config import (TILE_SIZE, INITIAL_MAP_SIZE, EXPANSION_BUFFER, MIN_MAP_SIZE
                     REPRODUCTION_AGE_MIN, REPRODUCTION_AGE_MAX,
                     COLONISTS_PER_TILE, BUILDINGS_PER_TILE,
                     MIN_BUILDING_SPACING, BUILDING_MARGIN,
-                    INITIAL_COLONISTS, CONSTRUCTION_SKILL_THRESHOLD,
-                    MIN_MONEY_FOR_BUILDING, BUILDING_CHANCE, TAX_RATE, INTEREST_RATE,
+                    CONSTRUCTION_SKILL_THRESHOLD, MIN_MONEY_FOR_BUILDING, BUILDING_CHANCE, TAX_RATE, INTEREST_RATE,
                     INITIAL_TREASURY)
 from .scenario import ScenarioManager  # new import
+import game.config as config  # Use dynamic config values
 
 class World:
     def __init__(self, screen_width=None, screen_height=None):
         # Automatically update grid size based on number of colonists.
-        self.current_size = max(INITIAL_MAP_SIZE, math.ceil(math.sqrt(INITIAL_COLONISTS)) * 2)  # changed line
+        self.current_size = max(INITIAL_MAP_SIZE, math.ceil(math.sqrt(config.INITIAL_COLONISTS)) * 2)  # changed line
         self.width = self.current_size * TILE_SIZE
         self.height = self.current_size * TILE_SIZE
         self.ui = None
@@ -221,7 +221,7 @@ class World:
         self.jobs.extend(farm.create_jobs())
         
         # Create initial colonists near buildings
-        for _ in range(INITIAL_COLONISTS):
+        for _ in range(config.INITIAL_COLONISTS):  # changed line
             building = random.choice(self.buildings)
             building_grid_x, building_grid_y = self.get_grid_position(building.x, building.y)
             
@@ -312,8 +312,8 @@ class World:
         self.handle_reproduction()
         self.handle_deaths()
         
-        # New: Check and perform map expansion if needed
-        if self.check_expansion_needed():
+        # New: Repeatedly check and perform map expansion if needed
+        while self.check_expansion_needed():
             self.expand_map()
         
         # New: Let colonists attempt autonomous building if they have enough funds

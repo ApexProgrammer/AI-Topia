@@ -9,14 +9,20 @@ class Button:
         self.hovered = False
 
     def draw(self, screen):
-        color = (min(self.color[0] + 20, 255),
-                min(self.color[1] + 20, 255),
-                min(self.color[2] + 20, 255)) if self.hovered else self.color
-        pygame.draw.rect(screen, color, self.rect)
-        pygame.draw.rect(screen, (0, 0, 0), self.rect, 2)
+        # Draw subtle shadow
+        shadow_rect = self.rect.copy()
+        shadow_rect.x += 3
+        shadow_rect.y += 3
+        pygame.draw.rect(screen, (0,0,0), shadow_rect, border_radius=8)
+        # Use rounded rectangle drawing
+        draw_color = (min(self.color[0] + 20, 255),
+                      min(self.color[1] + 20, 255),
+                      min(self.color[2] + 20, 255)) if self.hovered else self.color
+        pygame.draw.rect(screen, draw_color, self.rect, border_radius=8)
+        pygame.draw.rect(screen, (0, 0, 0), self.rect, 2, border_radius=8)
         
         font = pygame.font.Font(None, 24)
-        text_surface = font.render(self.text, True, (0, 0, 0))
+        text_surface = font.render(self.text, True, (255, 255, 255))
         text_rect = text_surface.get_rect(center=self.rect.center)
         screen.blit(text_surface, text_rect)
 

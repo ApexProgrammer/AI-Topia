@@ -1,5 +1,5 @@
 import pygame
-from .config import WINDOW_WIDTH, WINDOW_HEIGHT, BUILDING_TYPES, EXPANSION_COST
+from .config import WINDOW_WIDTH, WINDOW_HEIGHT, BUILDING_TYPES, EXPANSION_COST, TILE_SIZE
 
 class Button:
     def __init__(self, x, y, width, height, text, color):

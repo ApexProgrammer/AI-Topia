@@ -1068,3 +1068,29 @@ class World:
                 # Clear selection if clicked empty space
                 if self.ui:
                     self.ui.selected_colonist = None
+
+    def is_valid_building_location(self, grid_x, grid_y, building_type):
+        """Check if a building can be placed at the given grid location"""
+        if building_type not in BUILDING_TYPES:
+            return False
+            
+        building_size = BUILDING_TYPES[building_type]['size']
+        
+        # Check if location is within bounds
+        if (grid_x < 0 or grid_x + building_size > self.current_size or
+            grid_y < 0 or grid_y + building_size > self.current_size):
+            return False
+        
+        # Check if area is clear including spacing
+        for dx in range(-MIN_BUILDING_SPACING, building_size + MIN_BUILDING_SPACING):
+            for dy in range(-MIN_BUILDING_SPACING, building_size + MIN_BUILDING_SPACING):
+                check_x = grid_x + dx
+                check_y = grid_y + dy
+                
+                # Only check spacing within world bounds
+                if (0 <= check_x < self.current_size and 
+                    0 <= check_y < self.current_size):
+                    if self.is_grid_occupied(check_x, check_y):
+                        return False
+        
+        return True

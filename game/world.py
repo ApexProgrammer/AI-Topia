@@ -1,8 +1,9 @@
 import pygame
 import random
-import math  # added import
+import math
 from .entities.colonist import Colonist
 from .entities.building import Building
+from . import config
 from .config import (TILE_SIZE, INITIAL_MAP_SIZE, EXPANSION_BUFFER, MIN_MAP_SIZE,
                     MAX_MAP_SIZE, EXPANSION_COST, BUILDING_TYPES,
                     REPRODUCTION_AGE_MIN, REPRODUCTION_AGE_MAX,
@@ -10,20 +11,22 @@ from .config import (TILE_SIZE, INITIAL_MAP_SIZE, EXPANSION_BUFFER, MIN_MAP_SIZE
                     MIN_BUILDING_SPACING, BUILDING_MARGIN,
                     CONSTRUCTION_SKILL_THRESHOLD, MIN_MONEY_FOR_BUILDING, BUILDING_CHANCE, TAX_RATE, INTEREST_RATE,
                     INITIAL_TREASURY)
-from .scenario import ScenarioManager  # new import
-import game.config as config  # Use dynamic config values
+from .scenario import ScenarioManager
 
 class World:
     def __init__(self, screen_width=None, screen_height=None):
-        # Automatically update grid size based on number of colonists.
-        self.current_size = max(INITIAL_MAP_SIZE, math.ceil(math.sqrt(config.INITIAL_COLONISTS)) * 2)  # changed line
-        self.width = self.current_size * TILE_SIZE
-        self.height = self.current_size * TILE_SIZE
-        self.ui = None
+        # Initialize pygame font
+        pygame.font.init()
+        self.font = pygame.font.Font(None, 24)
         
         # Store screen dimensions
         self.screen_width = screen_width
         self.screen_height = screen_height
+        
+        # Automatically update grid size based on number of colonists
+        self.current_size = max(INITIAL_MAP_SIZE, math.ceil(math.sqrt(config.INITIAL_COLONISTS)) * 2)
+        self.width = self.current_size * TILE_SIZE
+        self.height = self.current_size * TILE_SIZE
         
         # Calculate center offset
         if screen_width and screen_height:
@@ -33,6 +36,8 @@ class World:
             self.offset_x = 0
             self.offset_y = 0
         
+        self.ui = None
+        
         # Initialize lists
         self.colonists = []
         self.buildings = []
@@ -41,9 +46,7 @@ class World:
         
         # Initialize state
         self.treasury = INITIAL_TREASURY
-        # New scoring attribute for decisions and outcomes
-        self.score = 0  
-        # New scenario manager for ethical challenges
+        self.score = 0
         self.scenario_manager = ScenarioManager(self)
         self.gdp = 0
         self.leader = None
@@ -56,10 +59,22 @@ class World:
         self.birth_history = []
         self.death_history = []
         self.election_history = []
-        self.economic_history = []  # Track economic metrics
+        self.economic_history = []
         
         # Grid tracking
         self.grid_occupation = {}
+        
+        # Resource tracking
+        self.colony_inventory = {
+            'food': 100,
+            'wood': 50,
+            'stone': 30,
+            'metal': 20,
+            'goods': 0
+        }
+        self.resource_alerts = []
+        self.building_requirements = {}
+        self.building_zones = {}
         
         # Generate initial colony
         self.generate_initial_colony()
@@ -69,33 +84,59 @@ class World:
         if isinstance(pos, tuple):
             x, y = pos
         else:
-            x, y = pos[0], pos[1]
-        return (x + self.offset_x, y + self.offset_y)
+            x = pos
+            y = None
+            
+        if self.screen_width and self.screen_height:
+            # Center the world in the screen
+            x = x + (self.screen_width - self.width) // 2
+            if y is not None:
+                y = y + (self.screen_height - self.height) // 2
+        
+        return (x, y) if y is not None else x
 
     def screen_to_world(self, pos):
         """Convert screen coordinates to world coordinates"""
         if isinstance(pos, tuple):
             x, y = pos
         else:
-            x, y = pos[0], pos[1]
-        return (x - self.offset_x, y - self.offset_y)
+            x = pos
+            y = None
+            
+        if self.screen_width and self.screen_height:
+            # Account for centered world offset
+            x = x - (self.screen_width - self.width) // 2
+            if y is not None:
+                y = x - (self.screen_height - self.height) // 2
+        
+        return (x, y) if y is not None else x
 
     def get_grid_position(self, x, y=None):
         """Convert world coordinates to grid coordinates"""
         if y is None and isinstance(x, (tuple, list)):
-            x, y = x[0], x[1]
-        # Remove offset for grid calculation
-        x = x - self.offset_x
-        y = y - self.offset_y
+            x, y = x
+        
+        if self.screen_width and self.screen_height:
+            # Remove centering offset
+            x = x - (self.screen_width - self.width) // 2
+            y = y - (self.screen_height - self.height) // 2
+            
         return (int(x / TILE_SIZE), int(y / TILE_SIZE))
 
     def get_pixel_position(self, x, y=None):
         """Convert grid coordinates to world coordinates (center of tile)"""
         if y is None and isinstance(x, (tuple, list)):
-            x, y = x[0], x[1]
-        # Convert to pixel coordinates and add offset
-        world_x = x * TILE_SIZE + TILE_SIZE // 2 + self.offset_x
-        world_y = y * TILE_SIZE + TILE_SIZE // 2 + self.offset_y
+            x, y = x
+            
+        # Convert to pixel coordinates
+        world_x = x * TILE_SIZE + TILE_SIZE // 2
+        world_y = y * TILE_SIZE + TILE_SIZE // 2
+        
+        if self.screen_width and self.screen_height:
+            # Add centering offset
+            world_x += (self.screen_width - self.width) // 2
+            world_y += (self.screen_height - self.height) // 2
+            
         return (world_x, world_y)
 
     def find_building_location(self, building_type):
@@ -160,7 +201,7 @@ class World:
                     return False
         
         # Create building
-        building = Building(building_type, x, y, self)
+        building = Building(building_type=building_type, x=x, y=y, world=self)
         self.buildings.append(building)
         
         # Occupy grid positions
@@ -184,7 +225,7 @@ class World:
         
         # Create central government building
         gov_pos = self.get_pixel_position(center_x, center_y)
-        gov_building = Building('government', gov_pos[0], gov_pos[1], self)
+        gov_building = Building(building_type='government', x=gov_pos[0], y=gov_pos[1], world=self)
         self.buildings.append(gov_building)
         self.add_to_grid(gov_building, center_x, center_y)
         self.jobs.extend(gov_building.create_jobs())
@@ -201,27 +242,28 @@ class World:
             grid_y = center_y + offset_y
             if 0 <= grid_x < self.current_size and 0 <= grid_y < self.current_size:
                 pos = self.get_pixel_position(grid_x, grid_y)
-                house = Building('house', pos[0], pos[1], self)
+                house = Building(building_type='house', x=pos[0], y=pos[1], world=self)
                 self.buildings.append(house)
                 self.homes.append(house)
                 self.add_to_grid(house, grid_x, grid_y)
         
-        # Create shop and farm
-        shop_pos = self.get_pixel_position(center_x + 3, center_y + 3)
+        # Create market and farm
+        market_pos = self.get_pixel_position(center_x + 3, center_y + 3)
         farm_pos = self.get_pixel_position(center_x - 3, center_y + 3)
         
-        shop = Building('shop', shop_pos[0], shop_pos[1], self)
-        farm = Building('farm', farm_pos[0], farm_pos[1], self)
+        market = Building(building_type='market', x=market_pos[0], y=market_pos[1], world=self)
+        farm = Building(building_type='farm', x=farm_pos[0], y=farm_pos[1], world=self)
         
-        self.buildings.extend([shop, farm])
-        self.add_to_grid(shop, center_x + 3, center_y + 3)
+        self.buildings.extend([market, farm])
+        self.add_to_grid(market, center_x + 3, center_y + 3)
         self.add_to_grid(farm, center_x - 3, center_y + 3)
         
-        self.jobs.extend(shop.create_jobs())
+        self.jobs.extend(market.create_jobs())
         self.jobs.extend(farm.create_jobs())
         
         # Create initial colonists near buildings
-        for _ in range(config.INITIAL_COLONISTS):  # changed line
+        for _ in range(config.INITIAL_COLONISTS):
+            # Choose a random building to place colonist near
             building = random.choice(self.buildings)
             building_grid_x, building_grid_y = self.get_grid_position(building.x, building.y)
             
@@ -235,27 +277,18 @@ class World:
                     0 <= colonist_grid_y < self.current_size):
                     
                     if not self.is_grid_occupied(colonist_grid_x, colonist_grid_y):
+                        # Convert to pixel coordinates
                         colonist_pos = self.get_pixel_position(colonist_grid_x, colonist_grid_y)
                         colonist = Colonist(colonist_pos[0], colonist_pos[1], self)
+                        
                         self.colonists.append(colonist)
                         self.add_to_grid(colonist, colonist_grid_x, colonist_grid_y)
                         placed = True
                         break
-            
+                        
+            # If no adjacent spot found, try again with another building
             if not placed:
-                # If no empty adjacent tile, place randomly near building
-                for _ in range(10):  # Try 10 times to find a spot
-                    offset_x = random.randint(-2, 2)
-                    offset_y = random.randint(-2, 2)
-                    colonist_grid_x = max(0, min(self.current_size - 1, building_grid_x + offset_x))
-                    colonist_grid_y = max(0, min(self.current_size - 1, building_grid_y + offset_y))
-                    
-                    if not self.is_grid_occupied(colonist_grid_x, colonist_grid_y):
-                        colonist_pos = self.get_pixel_position(colonist_grid_x, colonist_grid_y)
-                        colonist = Colonist(colonist_pos[0], colonist_pos[1], self)
-                        self.colonists.append(colonist)
-                        self.add_to_grid(colonist, colonist_grid_x, colonist_grid_y)
-                        break
+                continue
 
     def render(self, screen):
         # Get camera offset
@@ -284,12 +317,65 @@ class World:
                            (self.offset_x + camera_x, screen_y),
                            (self.offset_x + self.width + camera_x, screen_y))
         
+        # Draw building zones if in building mode
+        if self.ui and self.ui.show_building_menu:
+            self._render_building_zones(screen, camera_x, camera_y, zoom)
+            
         # Draw entities
         for building in self.buildings:
             building.render(screen, camera_x, camera_y, zoom)
         
         for colonist in self.colonists:
             colonist.render(screen, camera_x, camera_y, zoom)
+
+    def _render_building_zones(self, screen, camera_x, camera_y, zoom):
+        """Render building zone suggestions with efficiency indicators"""
+        selected_type = self.ui.selected_building_type
+        
+        for (grid_x, grid_y), scores in self.building_zones.items():
+            if not scores:
+                continue
+                
+            pixel_x, pixel_y = self.get_pixel_position(grid_x, grid_y)
+            screen_x = int((pixel_x + camera_x) * zoom)
+            screen_y = int((pixel_y + camera_y) * zoom)
+            
+            # If a building type is selected, only show scores for that type
+            if selected_type:
+                if selected_type in scores:
+                    score = scores[selected_type]
+                    alpha = int(score * 2.55)  # Convert 0-100 to 0-255
+                    color = (0, 255, 0, alpha)  # Green with variable transparency
+                    
+                    s = pygame.Surface((TILE_SIZE, TILE_SIZE))
+                    s.set_alpha(alpha)
+                    s.fill((0, 255, 0))
+                    screen.blit(s, (screen_x - TILE_SIZE//2, screen_y - TILE_SIZE//2))
+            else:
+                # Show best building type for each zone
+                best_type = max(scores.items(), key=lambda x: x[1])[0]
+                score = scores[best_type]
+                if score > 50:  # Only show high-scoring suggestions
+                    color = {
+                        'house': (100, 200, 255),
+                        'farm': (100, 255, 100),
+                        'woodcutter': (139, 69, 19),
+                        'quarry': (169, 169, 169),
+                        'mine': (105, 105, 105),
+                        'workshop': (200, 200, 100),
+                        'market': (255, 200, 100),
+                        'tavern': (255, 100, 255)
+                    }.get(best_type, (200, 200, 200))
+                    
+                    s = pygame.Surface((TILE_SIZE, TILE_SIZE))
+                    s.set_alpha(100)
+                    s.fill(color)
+                    screen.blit(s, (screen_x - TILE_SIZE//2, screen_y - TILE_SIZE//2))
+                    
+                    # Draw small indicator of building type
+                    indicator = self.font.render(best_type[0].upper(), True, (255, 255, 255))
+                    screen.blit(indicator, (screen_x - indicator.get_width()//2, 
+                                         screen_y - indicator.get_height()//2))
 
     def update(self):
         # New: Get simulation speed multiplier from UI if available
@@ -323,6 +409,9 @@ class World:
 
         # New: Update scenario manager for ethical challenge events
         self.scenario_manager.update()
+
+        # New: Update building zones for suggestions
+        self.update_building_zones()
 
     def update_economy(self):
         """Update the colony's economy"""
@@ -743,8 +832,8 @@ class World:
         if food_per_colonist < 5:  # Less than 5 food per colonist
             priorities.append(('farm', 4 * (1 + (5 - food_per_colonist)/5)))
         if job_ratio > 0.3:  # More than 30% unemployed
-            priorities.append(('factory', 3 * (1 + job_ratio)))
-            priorities.append(('shop', 3 * (1 + job_ratio)))
+            priorities.append(('market', 3 * (1 + job_ratio)))
+            priorities.append(('farm', 3 * (1 + job_ratio)))
         
         # Development needs (medium priority)
         if len(self.buildings) > 5:
@@ -761,21 +850,221 @@ class World:
         if priorities:
             # Choose building type based on weighted priorities
             building_type, priority = max(priorities, key=lambda x: x[1] * (0.8 + random.random() * 0.4))
-            building_cost = BUILDING_TYPES[building_type]['cost']
             
-            if colonist.money >= building_cost:
+            # Check if we have enough resources for the building
+            building_costs = BUILDING_TYPES[building_type]['cost']
+            can_afford = True
+            for resource, amount in building_costs.items():
+                if self.colony_inventory.get(resource, 0) < amount:
+                    can_afford = False
+                    break
+            
+            if can_afford:
                 # Find suitable location
                 location = self.find_building_location(building_type)
                 if location:
                     grid_x, grid_y = location
                     pos = self.get_pixel_position(grid_x, grid_y)
                     
-                    # Create building
+                    # Try to create building
                     if self.create_building(building_type, pos[0], pos[1]):
-                        colonist.money -= building_cost
-                        colonist.inventory['money'] = colonist.money
-                        colonist.happiness += 10  # Happiness boost for successful building
+                        # Deduct resources
+                        for resource, amount in building_costs.items():
+                            self.colony_inventory[resource] -= amount
                         
-                        # Set colonist's task
+                        colonist.happiness += 10  # Happiness boost for successful building
                         colonist.current_task = 'building'
                         colonist.target_position = pos
+
+    def add_to_colony_inventory(self, resource_type, amount):
+        """Add resources to the shared colony inventory"""
+        if resource_type in self.colony_inventory:
+            self.colony_inventory[resource_type] += amount
+        else:
+            self.colony_inventory[resource_type] = amount
+            
+    def can_build(self, building_type, x, y):
+        """Check if a building can be placed at the given location"""
+        if building_type not in BUILDING_TYPES:
+            return False, "Invalid building type"
+            
+        # Check resource costs
+        building_costs = BUILDING_TYPES[building_type].get('cost', {})
+        for resource, amount in building_costs.items():
+            if self.colony_inventory.get(resource, 0) < amount:
+                return False, f"Insufficient {resource}"
+                
+        # Check terrain and spacing
+        grid_x, grid_y = self.get_grid_position(x, y)
+        if not self.is_valid_building_location(grid_x, grid_y, building_type):
+            return False, "Invalid location"
+            
+        return True, "Can build"
+        
+    def build_structure(self, building_type, x, y):
+        """Place a new building (called by UI/player)"""
+        can_build, message = self.can_build(building_type, x, y)
+        if not can_build:
+            return False, message
+            
+        # Deduct resources
+        building_costs = BUILDING_TYPES[building_type].get('cost', {})
+        for resource, amount in building_costs.items():
+            self.colony_inventory[resource] -= amount
+            
+        # Create building
+        building = Building(building_type=building_type, x=x, y=y, world=self)
+        self.buildings.append(building)
+        
+        # Update appropriate lists
+        grid_x, grid_y = self.get_grid_position(x, y)
+        building_size = BUILDING_TYPES[building_type]['size']
+        for dx in range(building_size):
+            for dy in range(building_size):
+                self.add_to_grid(building, grid_x + dx, grid_y + dy)
+        
+        if building_type == 'house':
+            self.homes.append(building)
+        elif building_type in ['shop', 'factory', 'farm', 'bank', 'government']:
+            self.jobs.extend(building.create_jobs())
+            
+        return True, "Building placed"
+
+    def update_colony_needs(self):
+        """Enhanced colony needs tracking"""
+        total_colonists = len(self.colonists)
+        if total_colonists == 0:
+            return
+            
+        # Calculate needs with more detailed metrics
+        homeless = len([c for c in self.colonists if not c.home])
+        unemployed = len([c for c in self.colonists if not c.job])
+        avg_happiness = sum(c.happiness for c in self.colonists) / total_colonists
+        
+        # Calculate resource consumption rates
+        consumption_rates = {
+            'food': 0.1 * total_colonists,
+            'wood': 0.05 * total_colonists,
+            'stone': 0.02 * total_colonists,
+            'metal': 0.01 * total_colonists,
+            'goods': 0.03 * total_colonists
+        }
+        
+        # Calculate production rates
+        production_rates = {}
+        for building in self.buildings:
+            if building.produces:
+                workers = len([j for j in building.jobs if j.employee])
+                if workers > 0:
+                    efficiency = workers / building.max_jobs
+                    rate = building.production_rate * efficiency
+                    if building.produces in production_rates:
+                        production_rates[building.produces] += rate
+                    else:
+                        production_rates[building.produces] = rate
+        
+        # Update requirements
+        self.building_requirements = {
+            'housing': max(0, homeless),
+            'jobs': max(0, unemployed),
+            'happiness': avg_happiness,
+            'resources': {
+                resource: {
+                    'amount': self.colony_inventory.get(resource, 0),
+                    'consumption': consumption_rates.get(resource, 0),
+                    'production': production_rates.get(resource, 0)
+                }
+                for resource in self.colony_inventory
+            }
+        }
+        
+        # Generate alerts
+        self.resource_alerts = []
+        for resource, data in self.building_requirements['resources'].items():
+            if data['amount'] < data['consumption'] * 10:  # Less than 10 days supply
+                self.resource_alerts.append(f"Critical: Low {resource} supply!")
+            elif data['production'] < data['consumption']:
+                self.resource_alerts.append(f"Warning: {resource} consumption exceeds production")
+
+    def update_building_zones(self):
+        """Update suggested building zones based on resources and efficiency"""
+        self.building_zones.clear()
+        
+        for grid_x in range(self.current_size):
+            for grid_y in range(self.current_size):
+                zone_score = self._calculate_zone_score(grid_x, grid_y)
+                if zone_score:
+                    self.building_zones[(grid_x, grid_y)] = zone_score
+
+    def _calculate_zone_score(self, grid_x, grid_y):
+        """Calculate building type scores for a given position"""
+        if self.is_grid_occupied(grid_x, grid_y):
+            return None
+            
+        scores = {}
+        pixel_x, pixel_y = self.get_pixel_position(grid_x, grid_y)
+        
+        # Check housing zones (near jobs and resources)
+        nearby_jobs = 0
+        for building in self.buildings:
+            if hasattr(building, 'jobs'):
+                distance = ((building.x - pixel_x)**2 + (building.y - pixel_y)**2)**0.5
+                if distance < 200:  # Within walking distance
+                    nearby_jobs += len(building.jobs)
+        if nearby_jobs > 0:
+            scores['house'] = min(100, nearby_jobs * 10)
+            
+        # Resource gathering buildings
+        resource_buildings = {
+            'farm': 0,
+            'woodcutter': 0,
+            'quarry': 0,
+            'mine': 0
+        }
+        
+        for building in self.buildings:
+            if building.building_type in resource_buildings:
+                distance = ((building.x - pixel_x)**2 + (building.y - pixel_y)**2)**0.5
+                if distance < 300:  # Resource competition radius
+                    resource_buildings[building.building_type] += 1
+                    
+        # Score resource buildings based on existing competition
+        for building_type in resource_buildings:
+            if resource_buildings[building_type] < 3:  # Allow up to 3 of each type in an area
+                scores[building_type] = 80 - (resource_buildings[building_type] * 20)
+                
+        # Score workshops near resource buildings
+        if any(count > 0 for count in resource_buildings.values()):
+            scores['workshop'] = 70
+            
+        # Score markets and taverns based on population density
+        nearby_houses = len([b for b in self.buildings 
+                           if b.building_type == 'house' and
+                           ((b.x - pixel_x)**2 + (b.y - pixel_y)**2)**0.5 < 250])
+        if nearby_houses > 0:
+            scores['market'] = min(90, nearby_houses * 15)
+            scores['tavern'] = min(85, nearby_houses * 12)
+            
+        return scores if scores else None
+
+    def handle_input(self, event):
+        """Handle input events for the world"""
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left click
+                mouse_pos = pygame.mouse.get_pos()
+                # Convert to world coordinates
+                world_x = mouse_pos[0] - self.offset_x
+                world_y = mouse_pos[1] - self.offset_y
+                grid_x = int(world_x / TILE_SIZE)
+                grid_y = int(world_y / TILE_SIZE)
+                
+                # Handle selection of entities
+                for colonist in self.colonists:
+                    if abs(colonist.x - world_x) < TILE_SIZE/2 and abs(colonist.y - world_y) < TILE_SIZE/2:
+                        if self.ui:
+                            self.ui.selected_colonist = colonist
+                        return
+                
+                # Clear selection if clicked empty space
+                if self.ui:
+                    self.ui.selected_colonist = None

@@ -2,30 +2,27 @@ import pygame
 import sys
 from game.world import World
 from game.ui import UI
-from game.config import FPS, TITLE
-
-import menu  # use the refactored menu
+from game.config import (FPS, TITLE, WINDOW_WIDTH, WINDOW_HEIGHT)
+import menu
 
 class Game:
     def __init__(self):
         pygame.init()
         
-        # Get the screen info
-        screen_info = pygame.display.Info()
-        self.width = screen_info.current_w
-        self.height = screen_info.current_h
-        
-        # Create a maximized window
-        self.screen = pygame.display.set_mode((self.width, self.height), pygame.NOFRAME)
+        # Initialize display
+        self.width = WINDOW_WIDTH
+        self.height = WINDOW_HEIGHT
+        self.screen = pygame.display.set_mode((self.width, self.height))
         pygame.display.set_caption(TITLE)
         self.clock = pygame.time.Clock()
         
+        # Initialize game state
+        self.running = True
+        
         # Initialize world and UI with proper references
         self.world = World(screen_width=self.width, screen_height=self.height)
-        self.ui = UI(self.screen, self.world)
+        self.ui = UI(screen=self.screen, world=self.world)
         self.world.set_ui(self.ui)
-        
-        self.running = True
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -34,8 +31,8 @@ class Game:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
-            self.ui.handle_event(event)
-            self.world.handle_event(event)
+            self.ui.handle_input(event)
+            self.world.handle_input(event)  # Updated to match new method name
 
     def update(self):
         self.world.update()

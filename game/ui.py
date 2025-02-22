@@ -104,6 +104,15 @@ class UI:
             pygame.K_UP: False,
             pygame.K_DOWN: False
         }
+        
+        # Building menu and placement
+        self.selected_building_type = None
+        self.show_building_menu = False
+        self.hovering_grid_pos = None
+        self.tooltip_text = None
+
+        self.update_timer = 0
+        self.UPDATE_INTERVAL = 30  # Update suggestions every 30 frames
 
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN:
@@ -153,6 +162,18 @@ class UI:
                         self.selected_colonist = colonist
                         self.show_colonist_info = True
                         break
+            
+            # Handle building placement
+            if event.button == 1:  # Left click
+                if self.selected_building_type and self.hovering_grid_pos:
+                    # Try to place building
+                    x, y = self.world.get_pixel_position(*self.hovering_grid_pos)
+                    success, message = self.world.build_structure(self.selected_building_type, x, y)
+                    if not success:
+                        self.tooltip_text = message
+            elif event.button == 3:  # Right click
+                self.show_building_menu = not self.show_building_menu
+                self.selected_building_type = None
         
         elif event.type == pygame.MOUSEMOTION:
             # Update button hover states
@@ -256,6 +277,45 @@ class UI:
         if abs(self.zoom - self.target_zoom) > 0.01:
             self.zoom += (self.target_zoom - self.zoom) * self.zoom_speed
 
+        """Update UI state and suggestions"""
+        # Update building zones periodically
+        self.update_timer += 1
+        if self.update_timer >= self.UPDATE_INTERVAL:
+            self.update_timer = 0
+            if self.show_building_menu:
+                self.world.update_building_zones()
+                self.world.update_colony_needs()
+                self.tooltip_text = self.generate_building_suggestion()
+
+    def handle_input(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left click
+                if self.selected_building_type and self.hovering_grid_pos:
+                    # Attempt to place building
+                    x, y = self.world.get_pixel_position(*self.hovering_grid_pos)
+                    success, message = self.world.build_structure(self.selected_building_type, x, y)
+                    if success:
+                        # Update suggestions immediately after placement
+                        self.world.update_building_zones()
+                        self.world.update_colony_needs()
+                        self.tooltip_text = self.generate_building_suggestion()
+                    else:
+                        self.tooltip_text = message
+            elif event.button == 3:  # Right click
+                self.show_building_menu = not self.show_building_menu
+                self.selected_building_type = None
+                if self.show_building_menu:
+                    self.world.update_building_zones()
+
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                self.selected_building_type = None
+                self.show_building_menu = False
+            elif event.key == pygame.K_b:
+                self.show_building_menu = not self.show_building_menu
+                if self.show_building_menu:
+                    self.world.update_building_zones()
+
     def screen_to_world(self, pos):
         """Convert screen coordinates to world coordinates"""
         return ((pos[0] - self.camera_x) / self.zoom,
@@ -321,6 +381,22 @@ class UI:
         # Render scenario overlay if active
         if self.world.scenario_manager.active_scenario:
             self.world.scenario_manager.render(self.screen, self.font)
+        
+        # Render colony status indicators
+        self._render_resource_indicators(self.screen)
+        self._render_alerts(self.screen)
+        
+        # Render building menu if open
+        if self.show_building_menu:
+            self._render_building_menu(self.screen)
+            
+        # Render building placement preview
+        if self.selected_building_type:
+            self._render_building_preview(self.screen)
+            
+        # Render tooltip
+        if self.tooltip_text:
+            self._render_tooltip(self.screen)
 
     def get_average_happiness(self):
         if not self.world.colonists:
@@ -559,3 +635,152 @@ class UI:
         for i, line in enumerate(info_lines):
             text = self.font.render(line, True, (255, 255, 255))
             self.screen.blit(text, (info_x + padding, info_y + padding + i * line_height))
+
+    def _render_resource_indicators(self, screen):
+        """Render resource levels and colony statistics"""
+        y = 10
+        for resource, amount in self.world.colony_inventory.items():
+            text = f"{resource.title()}: {amount:.1f}"
+            color = (255, 255, 255)
+            if amount < 100:  # Low resource warning
+                color = (255, 200, 200)
+            self.draw_text(screen, text, 10, y, color)
+            y += 25
+            
+        # Render colony stats
+        stats = self.world.building_requirements
+        if stats:
+            self.draw_text(screen, f"Housing needed: {stats['housing']}", 10, y, (255, 255, 255))
+            y += 25
+            self.draw_text(screen, f"Jobs needed: {stats['jobs']}", 10, y, (255, 255, 255))
+            y += 25
+            self.draw_text(screen, f"Average happiness: {stats['happiness']:.1f}%", 10, y, (255, 255, 255))
+
+    def _render_building_menu(self, screen):
+        """Render the building placement menu"""
+        menu_rect = pygame.Rect(screen.get_width() - 200, 0, 200, screen.get_height())
+        pygame.draw.rect(screen, (0, 0, 0, 180), menu_rect)
+        
+        y = 10
+        for building_type, data in BUILDING_TYPES.items():
+            button_rect = pygame.Rect(menu_rect.x + 10, y, 180, 40)
+            color = (100, 100, 200) if building_type == self.selected_building_type else (70, 70, 70)
+            pygame.draw.rect(screen, color, button_rect)
+            
+            # Draw building name and cost
+            self.draw_text(screen, building_type.title(), button_rect.x + 5, y + 5, (255, 255, 255))
+            cost_text = ", ".join(f"{amount} {res}" for res, amount in data.get('cost', {}).items())
+            self.draw_text(screen, cost_text, button_rect.x + 5, y + 22, (200, 200, 200), size=12)
+            
+            # Handle click
+            if button_rect.collidepoint(pygame.mouse.get_pos()):
+                self.tooltip_text = data.get('description', '')
+                if pygame.mouse.get_pressed()[0]:
+                    self.selected_building_type = building_type
+            
+            y += 50
+
+    def _render_building_preview(self, screen):
+        """Render building placement preview"""
+        mouse_pos = pygame.mouse.get_pos()
+        world_pos = self.screen_to_world(mouse_pos)
+        grid_x, grid_y = self.world.get_grid_position(world_pos[0], world_pos[1])
+        self.hovering_grid_pos = (grid_x, grid_y)
+        
+        if 0 <= grid_x < self.world.current_size and 0 <= grid_y < self.world.current_size:
+            pixel_x, pixel_y = self.world.get_pixel_position(grid_x, grid_y)
+            
+            # Check if placement is valid
+            can_build, message = self.world.can_build(self.selected_building_type, pixel_x, pixel_y)
+            color = (100, 255, 100, 128) if can_build else (255, 100, 100, 128)
+            
+            # Draw preview rectangle
+            preview_rect = pygame.Rect(
+                pixel_x - self.camera_x,
+                pixel_y - self.camera_y,
+                TILE_SIZE,
+                TILE_SIZE
+            )
+            pygame.draw.rect(screen, color, preview_rect)
+            
+            self.tooltip_text = message
+
+    def _render_alerts(self, screen):
+        """Render resource and need alerts"""
+        y = screen.get_height() - 100
+        for alert in self.world.resource_alerts:
+            self.draw_text(screen, alert, 10, y, (255, 100, 100))
+            y += 25
+
+    def _render_tooltip(self, screen):
+        """Render tooltip with building suggestions"""
+        if not self.tooltip_text:
+            return
+            
+        mouse_pos = pygame.mouse.get_pos()
+        padding = 5
+        
+        # Split tooltip into lines
+        lines = self.tooltip_text.split('\n')
+        line_surfaces = []
+        max_width = 0
+        total_height = 0
+        
+        for line in lines:
+            text_surface = self.font.render(line, True, (255, 255, 255))
+            line_surfaces.append(text_surface)
+            max_width = max(max_width, text_surface.get_width())
+            total_height += text_surface.get_height()
+            
+        # Create tooltip background
+        tooltip_rect = pygame.Rect(
+            mouse_pos[0] + 20,
+            mouse_pos[1] - total_height - 10,
+            max_width + padding * 2,
+            total_height + padding * 2
+        )
+        
+        # Keep tooltip on screen
+        if tooltip_rect.right > screen.get_width():
+            tooltip_rect.right = mouse_pos[0] - 20
+        if tooltip_rect.top < 0:
+            tooltip_rect.top = mouse_pos[1] + 20
+            
+        # Draw background
+        s = pygame.Surface((tooltip_rect.width, tooltip_rect.height))
+        s.set_alpha(230)
+        s.fill((40, 40, 40))
+        screen.blit(s, tooltip_rect)
+        pygame.draw.rect(screen, (100, 100, 100), tooltip_rect, 1)
+        
+        # Draw text
+        y = tooltip_rect.top + padding
+        for surface in line_surfaces:
+            screen.blit(surface, (tooltip_rect.left + padding, y))
+            y += surface.get_height()
+
+    def generate_building_suggestion(self):
+        """Generate building suggestions based on colony needs"""
+        suggestions = []
+        stats = self.world.building_requirements
+        
+        if stats['housing'] > 0:
+            suggestions.append(f"Need housing for {stats['housing']} colonists")
+        
+        if stats['jobs'] > 0:
+            suggestions.append(f"Need jobs for {stats['jobs']} colonists")
+        
+        for resource, data in stats['resources'].items():
+            if data['amount'] < 5:  # Low resource threshold
+                suggestions.append(f"Low on {resource}. Build more {resource} production.")
+        
+        if stats['happiness'] < 70:
+            suggestions.append("Consider building amenities to increase happiness")
+            
+        return "\n".join(suggestions) if suggestions else "Colony is doing well!"
+
+    def draw_text(self, screen, text, x, y, color=(255, 255, 255), size=24):
+        """Helper method to draw text on screen"""
+        font = pygame.font.Font(None, size)
+        text_surface = font.render(text, True, color)
+        screen.blit(text_surface, (x, y))

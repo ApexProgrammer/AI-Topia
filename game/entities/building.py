@@ -2,7 +2,8 @@ import pygame
 from ..config import (BUILDING_TYPES, TILE_SIZE, RESOURCES,
                      SUPPLY_DEMAND_IMPACT, INTEREST_RATE,
                      PRICE_VOLATILITY, MARKET_UPDATE_RATE, PRICE_MEMORY,
-                     JOB_SALARIES, MINIMUM_WAGE)
+                     JOB_SALARIES, MINIMUM_WAGE, BASE_STORAGE_CAPACITY,
+                     INVENTORY_UPDATE_RATE, HAPPINESS_RADIUS, WORK_RADIUS)
 
 class Job:
     def __init__(self, building):
@@ -44,11 +45,20 @@ class Building:
         self.cost = building_config['cost']
         self.build_time = building_config['build_time']
         self.size = building_config['size']  # Size in tiles
+        self.max_jobs = building_config.get('max_jobs', 0)
+        self.happiness_bonus = building_config.get('happiness_bonus', 0)
+        self.produces = building_config.get('produces', None)
+        self.production_rate = building_config.get('production_rate', 0)
+        
+        # Storage capacity
+        self.storage_multiplier = building_config.get('storage_multiplier', 1.0)
+        self.max_storage = BASE_STORAGE_CAPACITY * self.storage_multiplier
         
         # Building state
         self.construction_progress = 0
         self.is_complete = False
         self.current_occupants = 0
+        self.jobs = []
         
         # Initialize inventory and prices
         self.inventory = {}
@@ -58,14 +68,9 @@ class Building:
         
         # Set up based on building type
         if building_type == 'house':
-            self.capacity = building_config['capacity']
-        elif building_type in ['shop', 'factory', 'farm']:
-            self.jobs = []
-            self.max_jobs = building_config['jobs']
-            
-            if 'produces' in building_config:
-                self.produces = building_config['produces']
-                self.production_rate = building_config['production_rate']
+            self.capacity = building_config['max_occupants']
+        elif building_type in ['shop', 'factory', 'farm', 'woodcutter', 'quarry', 'mine', 'workshop']:
+            if self.produces:
                 self.inventory[self.produces] = 0
                 
             if 'sells' in building_config:
@@ -74,15 +79,6 @@ class Building:
                 for resource in self.sells:
                     self.inventory[resource] = 0
                     self.prices[resource] = RESOURCES[resource]['base_price'] * self.markup
-                    
-        elif building_type == 'bank':
-            self.jobs = []
-            self.max_jobs = building_config['jobs']
-            self.interest_rate = building_config['interest_rate']
-            
-        elif building_type == 'government':
-            self.jobs = []
-            self.max_jobs = building_config['jobs']
         
         # Financial tracking
         self.daily_revenue = 0
@@ -96,9 +92,13 @@ class Building:
             'farm': (150, 200, 50),
             'factory': (150, 150, 150),
             'shop': (200, 150, 100),
-            'restaurant': (200, 100, 100),
-            'bank': (200, 200, 50),
-            'government': (200, 100, 100)
+            'woodcutter': (139, 69, 19),
+            'quarry': (169, 169, 169),
+            'mine': (105, 105, 105),
+            'workshop': (200, 200, 100),
+            'market': (200, 150, 100),
+            'tavern': (200, 100, 200),
+            'government': (150, 150, 200)
         }
 
     def get_grid_bounds(self):
@@ -108,7 +108,7 @@ class Building:
                 for dx in range(self.size) 
                 for dy in range(self.size)]
 
-    def update(self):
+    def update(self, speed_multiplier=1.0):
         if not self.is_complete:
             self.construction_progress += 1
             if self.construction_progress >= self.build_time:
@@ -134,6 +134,22 @@ class Building:
             self.profit_history.append(self.daily_revenue - self.daily_expenses)
             self.daily_revenue = 0
             self.daily_expenses = 0
+            
+            # Handle production
+            if self.produces and self.jobs:
+                active_workers = len([job for job in self.jobs if job.employee])
+                if active_workers > 0:
+                    efficiency = active_workers / self.max_jobs
+                    production = self.production_rate * efficiency * speed_multiplier
+                    self.world.add_to_colony_inventory(self.produces, production)
+
+            # Apply happiness bonus to nearby colonists
+            if self.happiness_bonus > 0:
+                for colonist in self.world.colonists:
+                    distance = ((colonist.x - self.x)**2 + (colonist.y - self.y)**2)**0.5
+                    if distance < 200:  # Happiness bonus radius
+                        colonist.happiness = min(100, colonist.happiness + 
+                                              (self.happiness_bonus / 100) * speed_multiplier)
 
     def produce_resources(self):
         """Produce resources if this is a production building"""
@@ -207,13 +223,17 @@ class Building:
                 self.daily_expenses += interest
 
     def create_jobs(self):
-        """Create jobs for this building"""
-        if not hasattr(self, 'max_jobs'):
+        """Create job positions for this building"""
+        if not self.max_jobs:
             return []
             
         jobs = []
         for _ in range(self.max_jobs):
             job = Job(self)
+            if self.produces:
+                job.type = f"{self.produces}_gatherer"
+            else:
+                job.type = f"{self.building_type}_worker"
             self.jobs.append(job)
             jobs.append(job)
         return jobs

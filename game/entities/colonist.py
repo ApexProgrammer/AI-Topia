@@ -5,7 +5,8 @@ from ..ai.neural_network import ColonistBrain, INPUT_SIZE
 from ..config import (COLONIST_SPEED, WORKING_AGE, RETIREMENT_AGE, 
                      REPRODUCTION_AGE_MIN, REPRODUCTION_AGE_MAX, 
                      BUILDING_TYPES, TILE_SIZE, MOVEMENT_SPEED,
-                     MARRIAGE_CHANCE, ANIMATION_SPEED, WALK_FRAMES, RESOURCE_CONSUMPTION_RATE, JOB_SALARIES, MINIMUM_WAGE)
+                     MARRIAGE_CHANCE, ANIMATION_SPEED, WALK_FRAMES, 
+                     RESOURCE_CONSUMPTION_RATE, JOB_SALARIES, MINIMUM_WAGE)
 from .building import Building
 
 class Colonist:
@@ -55,6 +56,7 @@ class Colonist:
             'intelligence': random.randint(20, 100),
             'creativity': random.randint(20, 100),
             'work_ethic': random.randint(20, 100),
+            'leadership': random.randint(20, 100)
         }
         
         # Status
@@ -82,7 +84,7 @@ class Colonist:
         # Update relationships
         self.update_relationships()
         
-        # Get AI decision
+        # Get AI decision focused on gathering and social needs
         state = self.get_state()
         action = self.brain.decide_action(state)
         
@@ -92,16 +94,15 @@ class Colonist:
         # Handle movement
         self.move_towards_target()
         
-        # Update animation
+        # Update animation and basic needs
         if self.is_walking:
             self.animation_frame += ANIMATION_SPEED * speed_multiplier
             if self.animation_frame >= WALK_FRAMES:
                 self.animation_frame = 0
         
-        # Update basic needs and status
         self.update_basic_needs(speed_multiplier)
         self.update_happiness()
-        self.age += 0.0005 * speed_multiplier  # Scale aging
+        self.age += 0.0005 * speed_multiplier
 
     def update_basic_needs(self, speed_multiplier=1.0):
         """Update basic needs like energy, health, and resources"""
@@ -506,6 +507,7 @@ class Colonist:
 
     def get_state(self):
         """Get current state for AI input"""
+        # Total 22 features as per INPUT_SIZE configuration
         basic_state = [
             self.x / self.world.width,  # Normalized position
             self.y / self.world.height,
@@ -517,7 +519,6 @@ class Colonist:
             1 if self.job else 0,
             1 if self.home else 0,
             1 if self.spouse else 0,
-            len(self.children) / 5,  # Normalized number of children
         ]
         
         # Add personality traits
@@ -566,8 +567,8 @@ class Colonist:
         return base_compatibility + random.randint(-20, 20)
 
     def execute_action(self, action):
-        """Execute the action chosen by the AI"""
-        if action == 0:  # Find job
+        """Execute the action chosen by the AI - removed building decisions"""
+        if action == 0:  # Find job/gather resources
             if not self.job and WORKING_AGE <= self.age <= RETIREMENT_AGE:
                 self.seek_job()
         elif action == 1:  # Find home
@@ -577,18 +578,66 @@ class Colonist:
             if self.home:
                 self.target_position = (self.home.x, self.home.y)
                 self.energy = min(100, self.energy + 10)
-        elif action == 3:  # Work
+        elif action == 3:  # Work/Gather
             if self.job:
                 self.target_position = (self.job.x, self.job.y)
-        elif action == 4:  # Seek partner
-            if not self.spouse and REPRODUCTION_AGE_MIN <= self.age <= REPRODUCTION_AGE_MAX:
-                self.seek_partner()
-        elif action == 5:  # Random movement
-            self.random_movement()
-        elif action == 6:  # Socialize
+                self.gather_resources()
+        elif action == 4:  # Socialize
             self.seek_social_interaction()
-        elif action == 7:  # Visit shop
+        elif action == 5:  # Visit shop
             self.visit_nearest_shop()
+        elif action == 6:  # Random movement
+            self.random_movement()
+
+    def gather_resources(self):
+        """Enhanced resource gathering with efficiency bonuses"""
+        if not self.job:
+            return
+            
+        # Calculate base efficiency from traits and energy
+        efficiency = (
+            (self.traits['work_ethic'] / 100) * 0.4 +  # Work ethic contribution
+            (self.energy / 100) * 0.3 +                # Energy level contribution
+            (self.happiness / 100) * 0.2 +             # Happiness bonus
+            (self.traits['intelligence'] / 100) * 0.1   # Skill bonus
+        )
+        
+        # Job-specific trait bonuses
+        if hasattr(self.job, 'type'):
+            if self.job.type == 'farm_worker':
+                efficiency *= 1 + (self.traits['work_ethic'] / 200)  # Up to 50% bonus
+            elif self.job.type == 'mine_worker':
+                efficiency *= 1 + (self.traits['intelligence'] / 200)
+            elif self.job.type == 'woodcutter_worker':
+                efficiency *= 1 + (self.traits['work_ethic'] / 150)
+            elif self.job.type == 'workshop_worker':
+                efficiency *= 1 + (self.traits['creativity'] / 150)
+        
+        # Proximity bonus for resource gathering
+        if hasattr(self.job, 'building'):
+            distance = ((self.x - self.job.building.x)**2 + 
+                       (self.y - self.job.building.y)**2)**0.5
+            if distance < 50:  # Close to workplace
+                efficiency *= 1.2
+        
+        # Produce resources with calculated efficiency
+        if hasattr(self.job, 'produces'):
+            production = self.job.production_rate * efficiency
+            # Add to world's shared inventory instead of personal inventory
+            self.world.add_to_colony_inventory(self.job.produces, production)
+            
+            # Energy cost of gathering
+            self.energy = max(0, self.energy - 0.1)
+            
+            # Small happiness boost from successful gathering
+            if random.random() < 0.1:  # 10% chance per gather
+                self.happiness = min(100, self.happiness + 1)
+            
+            # Earn money for work
+            base_salary = JOB_SALARIES.get(self.job.type, MINIMUM_WAGE)
+            earned = (base_salary / 30) * efficiency  # Daily wage
+            self.money += earned
+            self.inventory['money'] = self.money
 
     def visit_nearest_shop(self):
         """Find and move to the nearest shop"""

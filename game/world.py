@@ -9,8 +9,9 @@ from .config import (TILE_SIZE, INITIAL_MAP_SIZE, EXPANSION_BUFFER, MIN_MAP_SIZE
                     REPRODUCTION_AGE_MIN, REPRODUCTION_AGE_MAX,
                     COLONISTS_PER_TILE, BUILDINGS_PER_TILE,
                     MIN_BUILDING_SPACING, BUILDING_MARGIN,
-                    CONSTRUCTION_SKILL_THRESHOLD, MIN_MONEY_FOR_BUILDING, BUILDING_CHANCE, TAX_RATE, INTEREST_RATE,
-                    INITIAL_TREASURY)
+                    CONSTRUCTION_SKILL_THRESHOLD, MIN_MONEY_FOR_BUILDING, 
+                    BUILDING_CHANCE, TAX_RATE, INTEREST_RATE,
+                    INITIAL_TREASURY, WORKING_AGE, RETIREMENT_AGE)
 from .scenario import ScenarioManager
 
 class World:
@@ -66,11 +67,11 @@ class World:
         
         # Resource tracking
         self.colony_inventory = {
-            'food': 100,
-            'wood': 50,
-            'stone': 30,
-            'metal': 20,
-            'goods': 0
+            'food': config.INITIAL_RESOURCES['food'],
+            'wood': config.INITIAL_RESOURCES['wood'],
+            'stone': config.INITIAL_RESOURCES['stone'],
+            'metal': config.INITIAL_RESOURCES['metal'],
+            'goods': config.INITIAL_RESOURCES['goods']
         }
         self.resource_alerts = []
         self.building_requirements = {}
@@ -218,7 +219,7 @@ class World:
         return True
 
     def generate_initial_colony(self):
-        """Generate initial colony"""
+        """Generate initial colony with all essential resource buildings"""
         # Calculate center of grid
         center_x = self.current_size // 2
         center_y = self.current_size // 2
@@ -247,19 +248,25 @@ class World:
                 self.homes.append(house)
                 self.add_to_grid(house, grid_x, grid_y)
         
-        # Create market and farm
-        market_pos = self.get_pixel_position(center_x + 3, center_y + 3)
-        farm_pos = self.get_pixel_position(center_x - 3, center_y + 3)
+        # Create essential resource buildings
+        resource_buildings = [
+            ('farm', 3, -3),       # Food production
+            ('woodcutter', -3, 3), # Wood production
+            ('quarry', 3, 3),      # Stone production
+            ('mine', -3, -3),      # Metal production
+            ('workshop', 0, 3),    # Goods production
+            ('market', 3, 0)       # Resource distribution
+        ]
         
-        market = Building(building_type='market', x=market_pos[0], y=market_pos[1], world=self)
-        farm = Building(building_type='farm', x=farm_pos[0], y=farm_pos[1], world=self)
-        
-        self.buildings.extend([market, farm])
-        self.add_to_grid(market, center_x + 3, center_y + 3)
-        self.add_to_grid(farm, center_x - 3, center_y + 3)
-        
-        self.jobs.extend(market.create_jobs())
-        self.jobs.extend(farm.create_jobs())
+        for building_type, offset_x, offset_y in resource_buildings:
+            grid_x = center_x + offset_x
+            grid_y = center_y + offset_y
+            if 0 <= grid_x < self.current_size and 0 <= grid_y < self.current_size:
+                pos = self.get_pixel_position(grid_x, grid_y)
+                building = Building(building_type=building_type, x=pos[0], y=pos[1], world=self)
+                self.buildings.append(building)
+                self.add_to_grid(building, grid_x, grid_y)
+                self.jobs.extend(building.create_jobs())
         
         # Create initial colonists near buildings
         for _ in range(config.INITIAL_COLONISTS):
@@ -377,16 +384,47 @@ class World:
                     screen.blit(indicator, (screen_x - indicator.get_width()//2, 
                                          screen_y - indicator.get_height()//2))
 
-    def update(self):
-        # New: Get simulation speed multiplier from UI if available
-        if self.ui and hasattr(self.ui, 'simulation_speed_options'):
-            speed_multiplier = self.ui.simulation_speed_options[self.ui.simulation_speed]
-        else:
-            speed_multiplier = 1.0
+    def update(self, speed_multiplier=1.0):
+        """Update world state with improved resource management"""
+        # Update everyone's needs first
+        self.update_colony_needs()
 
-        # Update colonists with simulation speed multiplier
+        # Update each colonist
         for colonist in self.colonists:
-            colonist.update(speed_multiplier)  # Updated call with multiplier
+            colonist.update(speed_multiplier)
+            
+            # Enhanced resource production checks
+            if colonist.job:
+                current_task = colonist.current_task
+                if current_task == 'working' and hasattr(colonist.job, 'produces'):
+                    # Calculate distance to workplace
+                    dx = colonist.x - colonist.job.x
+                    dy = colonist.y - colonist.job.y
+                    distance = (dx * dx + dy * dy) ** 0.5
+                    
+                    # Only gather resources if close to workplace
+                    if distance < 100:  # Within reasonable working distance
+                        colonist.gather_resources()
+                    else:
+                        # Move towards workplace
+                        colonist.target_position = (colonist.job.x, colonist.job.y)
+                elif current_task != 'working' and random.random() < 0.1:  # 10% chance to start working
+                    colonist.current_task = 'working'
+            elif WORKING_AGE <= colonist.age <= RETIREMENT_AGE and random.random() < 0.1:
+                # Unemployed working-age colonists actively seek jobs
+                colonist.seek_job()
+        
+        # Update building production and consumption
+        for building in self.buildings:
+            if building.produces:
+                workers = len([j for j in building.jobs if j.employee])
+                if workers > 0:
+                    efficiency = workers / building.max_jobs
+                    production_rate = building.production_rate * efficiency
+                    if building.produces in self.colony_inventory:
+                        self.colony_inventory[building.produces] += production_rate * speed_multiplier
+                    else:
+                        self.colony_inventory[building.produces] = production_rate * speed_multiplier
         
         # Update buildings
         for building in self.buildings:
@@ -484,7 +522,6 @@ class World:
                                     colonist.money -= price
                                     colonist.inventory['money'] = colonist.money
                                     colonist.inventory[resource] = (
-                                        colonist.inventory.get(resource, 0) + 1
                                     )
                                     building.inventory[resource] -= 1
                                     building.daily_revenue += price
@@ -931,7 +968,7 @@ class World:
         return True, "Building placed"
 
     def update_colony_needs(self):
-        """Enhanced colony needs tracking"""
+        """Enhanced colony needs tracking with improved resource management"""
         total_colonists = len(self.colonists)
         if total_colonists == 0:
             return
@@ -941,29 +978,35 @@ class World:
         unemployed = len([c for c in self.colonists if not c.job])
         avg_happiness = sum(c.happiness for c in self.colonists) / total_colonists
         
-        # Calculate resource consumption rates
+        # Calculate resource consumption rates per capita
         consumption_rates = {
             'food': 0.1 * total_colonists,
             'wood': 0.05 * total_colonists,
             'stone': 0.02 * total_colonists,
             'metal': 0.01 * total_colonists,
-            'goods': 0.03 * total_colonists
+            'goods': 0.03 * total_colonists,
+            'meals': 0.08 * total_colonists
         }
         
-        # Calculate production rates
+        # Calculate production rates and efficiency
         production_rates = {}
+        building_efficiency = {}
         for building in self.buildings:
             if building.produces:
                 workers = len([j for j in building.jobs if j.employee])
-                if workers > 0:
-                    efficiency = workers / building.max_jobs
+                max_workers = len(building.jobs) if hasattr(building, 'jobs') else 0
+                
+                if max_workers > 0:
+                    efficiency = workers / max_workers
+                    building_efficiency[building] = efficiency
                     rate = building.production_rate * efficiency
+                    
                     if building.produces in production_rates:
                         production_rates[building.produces] += rate
                     else:
                         production_rates[building.produces] = rate
         
-        # Update requirements
+        # Update requirements with detailed analysis
         self.building_requirements = {
             'housing': max(0, homeless),
             'jobs': max(0, unemployed),
@@ -972,19 +1015,24 @@ class World:
                 resource: {
                     'amount': self.colony_inventory.get(resource, 0),
                     'consumption': consumption_rates.get(resource, 0),
-                    'production': production_rates.get(resource, 0)
+                    'production': production_rates.get(resource, 0),
+                    'net_rate': production_rates.get(resource, 0) - consumption_rates.get(resource, 0),
+                    'days_remaining': (self.colony_inventory.get(resource, 0) / consumption_rates.get(resource, 1) 
+                                     if consumption_rates.get(resource, 0) > 0 else float('inf'))
                 }
                 for resource in self.colony_inventory
             }
         }
         
-        # Generate alerts
+        # Generate prioritized alerts
         self.resource_alerts = []
         for resource, data in self.building_requirements['resources'].items():
-            if data['amount'] < data['consumption'] * 10:  # Less than 10 days supply
-                self.resource_alerts.append(f"Critical: Low {resource} supply!")
-            elif data['production'] < data['consumption']:
-                self.resource_alerts.append(f"Warning: {resource} consumption exceeds production")
+            if data['days_remaining'] < 3:  # Critical shortage
+                self.resource_alerts.append(f"CRITICAL: {resource} will run out in {data['days_remaining']:.1f} days!")
+            elif data['days_remaining'] < 7:  # Warning level
+                self.resource_alerts.append(f"Warning: Low {resource} supply - {data['days_remaining']:.1f} days remaining")
+            elif data['net_rate'] < 0:  # Consumption exceeds production
+                self.resource_alerts.append(f"Notice: {resource} consumption exceeds production")
 
     def update_building_zones(self):
         """Update suggested building zones based on resources and efficiency"""

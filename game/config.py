@@ -16,13 +16,13 @@ EXPANSION_COST = 500
 MIN_BUILDING_SPACING = 1
 BUILDING_MARGIN = 1
 
-# Production Rates
-BASE_PRODUCTION_RATE = 0.1
-FOOD_PRODUCTION_RATE = 0.15
-WOOD_PRODUCTION_RATE = 0.12
-STONE_PRODUCTION_RATE = 0.08
-METAL_PRODUCTION_RATE = 0.05
-GOODS_PRODUCTION_RATE = 0.10
+# Production Rates - Balanced for initial colony needs
+BASE_PRODUCTION_RATE = 0.2
+FOOD_PRODUCTION_RATE = 0.3
+WOOD_PRODUCTION_RATE = 0.25
+STONE_PRODUCTION_RATE = 0.2
+METAL_PRODUCTION_RATE = 0.15
+GOODS_PRODUCTION_RATE = 0.2
 
 # Colonist Configuration
 COLONIST_SPEED = 0.05
@@ -50,39 +50,43 @@ BUILDING_TYPES = {
     },
     'farm': {
         'cost': {'wood': 15},
-        'description': 'Produces food',
+        'description': 'Produces food for the colony',
         'produces': 'food',
         'production_rate': FOOD_PRODUCTION_RATE,
         'max_jobs': 4,
         'build_time': 150,
-        'size': 2
+        'size': 2,
+        'storage_multiplier': 2.0
     },
     'woodcutter': {
         'cost': {'wood': 10},
-        'description': 'Gathers wood from nearby forests',
+        'description': 'Gathers wood from forests',
         'produces': 'wood',
         'production_rate': WOOD_PRODUCTION_RATE,
         'max_jobs': 3,
         'build_time': 100,
-        'size': 1
+        'size': 1,
+        'storage_multiplier': 1.5
     },
     'quarry': {
         'cost': {'wood': 20},
-        'description': 'Extracts stone',
+        'description': 'Extracts stone for construction',
         'produces': 'stone',
         'production_rate': STONE_PRODUCTION_RATE,
         'max_jobs': 3,
         'build_time': 200,
-        'size': 2
+        'size': 2,
+        'storage_multiplier': 1.5
     },
     'mine': {
         'cost': {'wood': 25, 'stone': 10},
-        'description': 'Produces metal',
+        'description': 'Produces metal for advanced buildings',
         'produces': 'metal',
         'production_rate': METAL_PRODUCTION_RATE,
         'max_jobs': 4,
         'build_time': 300,
-        'size': 2
+        'size': 2,
+        'storage_multiplier': 1.5
     },
     'workshop': {
         'cost': {'wood': 30, 'stone': 15, 'metal': 5},
@@ -96,14 +100,22 @@ BUILDING_TYPES = {
     },
     'market': {
         'cost': {'wood': 20, 'stone': 10},
-        'description': 'Allows colonists to buy goods',
+        'description': 'Central trading hub for all resources',
         'max_jobs': 3,
         'happiness_bonus': 5,
         'build_time': 150,
         'size': 2,
         'markup': 1.2,
-        'sells': ['food', 'goods'],
-        'storage_multiplier': 3.0
+        'sells': ['food', 'wood', 'stone', 'metal', 'goods', 'meals'],
+        'storage_multiplier': 5.0,
+        'base_prices': {
+            'food': 8,
+            'wood': 10,
+            'stone': 12,
+            'metal': 20,
+            'goods': 15,
+            'meals': 12
+        }
     },
     'tavern': {
         'cost': {'wood': 25, 'stone': 15},
@@ -120,15 +132,61 @@ BUILDING_TYPES = {
         'happiness_bonus': 5,
         'build_time': 300,
         'size': 3
+    },
+    'food_processor': {
+        'cost': {'wood': 30, 'stone': 15, 'metal': 10},
+        'description': 'Processes raw food into meals',
+        'produces': 'meals',
+        'production_rate': 0.2,
+        'max_jobs': 4,
+        'build_time': 200,
+        'size': 2,
+        'storage_multiplier': 1.5
+    },
+    'advanced_mine': {
+        'cost': {'wood': 40, 'stone': 30, 'metal': 20},
+        'description': 'Advanced mining facility with higher metal output',
+        'produces': 'metal',
+        'production_rate': 0.25,
+        'max_jobs': 6,
+        'build_time': 400,
+        'size': 3,
+        'storage_multiplier': 2.0
+    },
+    'lumber_mill': {
+        'cost': {'wood': 25, 'stone': 15},
+        'description': 'Processes wood more efficiently',
+        'produces': 'wood',
+        'production_rate': 0.3,
+        'max_jobs': 5,
+        'build_time': 250,
+        'size': 2,
+        'storage_multiplier': 2.0
+    },
+    'storage_warehouse': {
+        'cost': {'wood': 50, 'stone': 30, 'metal': 10},
+        'description': 'Large storage facility for resources',
+        'max_jobs': 3,
+        'build_time': 300,
+        'size': 3,
+        'storage_multiplier': 5.0,
+        'happiness_bonus': 2
     }
 }
 
+# Initial Resource Configuration
+INITIAL_RESOURCES = {
+    'food': 200,
+    'wood': 150,
+    'stone': 100,
+    'metal': 50,
+    'goods': 50
+}
+
 # Resource Generation
-FOOD_PRODUCTION_RATE = 15
-GOODS_PRODUCTION_RATE = 8
-RESOURCE_CONSUMPTION_RATE = 0.1
-RESOURCE_STORAGE_CAPACITY = 1000
-LOW_RESOURCE_THRESHOLD = 5  # Per capita
+RESOURCE_CONSUMPTION_RATE = 0.08  # Slightly reduced consumption rate
+RESOURCE_STORAGE_CAPACITY = 1500  # Increased storage capacity
+LOW_RESOURCE_THRESHOLD = 10  # Increased threshold for warnings
 
 # Economic Configuration
 INITIAL_CURRENCY = 2000
@@ -162,6 +220,16 @@ JOB_SALARIES = {
 }
 
 # Market Configuration
+MARKET_STORAGE_MULTIPLIER = 5.0  # Increased storage for markets
+BASE_MARKET_PRICES = {
+    'food': 8,
+    'wood': 10,
+    'stone': 12,
+    'metal': 20,
+    'goods': 15,
+    'meals': 12
+}
+
 SUPPLY_DEMAND_IMPACT = 0.2
 PRICE_MEMORY = 10
 PRICE_VOLATILITY = 0.1

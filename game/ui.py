@@ -327,14 +327,19 @@ class UI:
                 pos[1] * self.zoom + self.camera_y)
 
     def render(self):
-        # Draw buttons
+        """Main render function with improved menu positioning"""
+        # Draw buttons in top-left corner
+        button_y = 10
+        button_x = 10
         for button in self.buttons.values():
+            button.rect.x = button_x
+            button.rect.y = button_y
             button.draw(self.screen)
-        
-        # Draw stats
-        stats_y = 50
+            button_x += button.rect.width + 10
+
+        # Draw stats below buttons
+        stats_y = button_y + self.buttons['policies'].rect.height + 20
         stats = [
-            f"Score:",
             f"Population: {len(self.world.colonists)}",
             f"Treasury: ${self.world.treasury:,.2f}",
             f"GDP: ${self.world.gdp:,.2f}",
@@ -348,33 +353,15 @@ class UI:
             text = self.font.render(stat, True, (255, 255, 255))
             self.screen.blit(text, (10, stats_y + i * 25))
         
-        # Draw current leader info if exists
-        if self.world.leader and self.world.leader in self.world.colonists:
-            leader_y = stats_y + len(stats) * 25 + 20
-            leader_stats = [
-                "Current Leader:",
-                f"Name: Colonist #{self.world.colonists.index(self.world.leader)}",
-                f"Age: {int(self.world.leader.age)}",
-                f"Approval: {self.get_leader_approval():,.1f}%",
-                f"Political Alignment: {self.get_political_description(self.world.leader.political_alignment)}",
-                f"Term Remaining: {self.get_term_remaining()} days"
-            ]
-            
-            for i, stat in enumerate(leader_stats):
-                text = self.font.render(stat, True, (200, 200, 255))
-                self.screen.blit(text, (10, leader_y + i * 25))
-        elif self.world.election_timer >= self.world.term_length - 200:
-            # Show election status if no leader and election is upcoming
-            text = self.font.render("Election in Progress...", True, (255, 200, 200))
-            self.screen.blit(text, (10, stats_y + len(stats) * 25 + 20))
-        
-        # Draw menus
+        # Draw menus - ensure they don't overlap
         if self.policy_menu_open:
             self.draw_policy_menu()
-        if self.law_menu_open:
+        elif self.law_menu_open:
             self.draw_law_menu()
-        if self.show_election_info:
+        elif self.show_election_info:
             self.draw_election_info()
+        
+        # Draw colonist info if selected (positioned to not overlap with other menus)
         if self.show_colonist_info and self.selected_colonist:
             self.draw_colonist_info()
         
@@ -382,19 +369,17 @@ class UI:
         if self.world.scenario_manager.active_scenario:
             self.world.scenario_manager.render(self.screen, self.font)
         
-        # Render colony status indicators
+        # Always visible elements
         self._render_resource_indicators(self.screen)
         self._render_alerts(self.screen)
         
-        # Render building menu if open
+        # Building-related UI elements
         if self.show_building_menu:
             self._render_building_menu(self.screen)
-            
-        # Render building placement preview
         if self.selected_building_type:
             self._render_building_preview(self.screen)
-            
-        # Render tooltip
+        
+        # Render tooltip last so it's always on top
         if self.tooltip_text:
             self._render_tooltip(self.screen)
 
@@ -417,8 +402,9 @@ class UI:
 
     def get_employment_rate(self):
         """Calculate the percentage of working-age colonists who have jobs"""
+        from .config import WORKING_AGE, RETIREMENT_AGE
         working_age_colonists = [c for c in self.world.colonists 
-                               if 18 <= c.age <= 65]
+                               if WORKING_AGE <= c.age <= RETIREMENT_AGE]
         if not working_age_colonists:
             return 0
         employed = len([c for c in working_age_colonists if c.job])
@@ -452,44 +438,48 @@ class UI:
         return (term_length - elapsed) // 60  # Convert to days
 
     def draw_policy_menu(self):
-        """Enhanced policy menu with improved visual feedback"""
-        menu_x = self.screen.get_width() - 310
+        """Enhanced policy menu with improved visual feedback and positioning"""
+        menu_width = 300
+        menu_x = self.screen.get_width() - menu_width - 10
         menu_y = 10
-        width = 300
-        height = len(self.policies) * 60 + 20  # Adjusted for new spacing
+        padding = 15
+        item_height = 60
+        
+        # Calculate total height based on number of items
+        height = len(self.policies) * item_height + padding * 2
         
         # Draw background panel
-        s = pygame.Surface((width, height))
-        s.set_alpha(230)  # More opaque
-        s.fill((40, 40, 50))  # Slightly blue tint
+        s = pygame.Surface((menu_width, height))
+        s.set_alpha(230)
+        s.fill((30, 30, 40))
         self.screen.blit(s, (menu_x, menu_y))
-        pygame.draw.rect(self.screen, (100, 100, 150), (menu_x, menu_y, width, height), 1)
+        pygame.draw.rect(self.screen, (100, 100, 150), (menu_x, menu_y, menu_width, height), 1)
         
         # Draw title
         title = self.font.render("Policy Settings", True, (200, 200, 255))
-        self.screen.blit(title, (menu_x + 10, menu_y + 10))
+        self.screen.blit(title, (menu_x + padding, menu_y + padding))
         
-        y = menu_y + 40
+        y = menu_y + padding + 30
         for policy, value in self.policies.items():
             # Draw policy name
             name = policy.replace('_', ' ').title()
             text = self.font.render(name, True, (255, 255, 255))
-            self.screen.blit(text, (menu_x + 10, y))
+            self.screen.blit(text, (menu_x + padding, y))
             
             if isinstance(value, bool):
                 # Draw toggle switch
-                self.draw_toggle(menu_x + 10, y + 25, value, "")
+                self.draw_toggle(menu_x + padding, y + 25, value, "")
             else:
                 # Draw slider with current value
                 range_info = self.policy_ranges.get(policy, {'min': 0, 'max': 100, 'step': 1, 'format': '{:.0f}'})
-                self.draw_slider(menu_x + 10, y + 25, 200, 20, value, range_info)
+                self.draw_slider(menu_x + padding, y + 25, menu_width - padding * 3, 20, value, range_info)
                 
                 # Draw current value
                 value_text = range_info['format'].format(value)
-                text = self.font.render(value_text, True, (200, 200, 255))
-                self.screen.blit(text, (menu_x + 220, y + 25))
+                value_surface = self.font.render(value_text, True, (200, 200, 255))
+                self.screen.blit(value_surface, (menu_x + menu_width - padding - value_surface.get_width(), y))
             
-            y += 60
+            y += item_height
 
     def draw_slider(self, x, y, width, height, value, range_info):
         """Draw an improved slider with better visual feedback"""
@@ -535,24 +525,32 @@ class UI:
         return pygame.Rect(x, y, width + 10 + label.get_width(), height)
 
     def draw_law_menu(self):
-        menu_x = self.screen.get_width() - 310
+        """Draw law menu with improved layout and visibility"""
+        menu_width = 300
+        menu_x = self.screen.get_width() - menu_width - 10
         menu_y = 10
-        width = 300
-        height = 400
+        padding = 15
+        item_height = 40
+        
+        # Calculate total height
+        height = len(self.laws) * item_height + padding * 3
         
         # Draw background
-        s = pygame.Surface((width, height))
-        s.set_alpha(200)
-        s.fill((50, 50, 50))
+        s = pygame.Surface((menu_width, height))
+        s.set_alpha(230)
+        s.fill((30, 30, 40))
         self.screen.blit(s, (menu_x, menu_y))
+        pygame.draw.rect(self.screen, (100, 100, 150), (menu_x, menu_y, menu_width, height), 1)
         
-        # Draw laws with toggles
-        y = menu_y + 20
+        # Draw title
+        title = self.font.render("Laws", True, (200, 200, 255))
+        self.screen.blit(title, (menu_x + padding, menu_y + padding))
+        
+        y = menu_y + padding * 2 + title.get_height()
         for law, value in self.laws.items():
-            text = f"{law.replace('_', ' ').title()}: {'Enforced' if value else 'Not Enforced'}"
-            text_surface = self.font.render(text, True, (255, 255, 255))
-            self.screen.blit(text_surface, (menu_x + 10, y))
-            y += 30
+            # Draw toggle switch
+            self.draw_toggle(menu_x + padding, y, value, law.replace('_', ' ').title())
+            y += item_height
 
     def draw_election_info(self):
         if not self.world.election_candidates:
@@ -598,17 +596,13 @@ class UI:
         return (supporters / len(self.world.colonists)) * 100
 
     def draw_colonist_info(self):
-        """Draw detailed information about selected colonist"""
-        info_x = self.screen.get_width() - 300
+        """Draw colonist info panel in the right-middle area"""
+        info_width = 280
+        info_x = self.screen.get_width() - info_width - 10  # Account for padding
         info_y = 100
         padding = 10
         line_height = 25
         
-        # Draw background
-        pygame.draw.rect(self.screen, (50, 50, 50, 200),
-                        (info_x, info_y, 290, 400))
-        
-        # Draw colonist information
         colonist = self.selected_colonist
         info_lines = [
             f"Age: {int(colonist.age)}",
@@ -632,53 +626,111 @@ class UI:
             f"Children: {len(colonist.children)}"
         ]
         
+        # Calculate panel height based on content
+        panel_height = len(info_lines) * line_height + padding * 2
+        
+        # Draw background with improved visibility
+        s = pygame.Surface((info_width, panel_height))
+        s.set_alpha(230)
+        s.fill((30, 30, 40))
+        self.screen.blit(s, (info_x, info_y))
+        pygame.draw.rect(self.screen, (100, 100, 150), (info_x, info_y, info_width, panel_height), 1)
+        
+        # Draw information
         for i, line in enumerate(info_lines):
-            text = self.font.render(line, True, (255, 255, 255))
-            self.screen.blit(text, (info_x + padding, info_y + padding + i * line_height))
+            color = (200, 200, 255) if line.endswith(':') else (255, 255, 255)  # Highlight headers
+            self.draw_text(self.screen, line, info_x + padding, info_y + padding + i * line_height, color)
 
     def _render_resource_indicators(self, screen):
-        """Render resource levels and colony statistics"""
-        y = 10
+        """Render resource levels and colony statistics in the top-left corner"""
+        # Resources section
+        resource_x = 10
+        resource_y = 10
         for resource, amount in self.world.colony_inventory.items():
             text = f"{resource.title()}: {amount:.1f}"
-            color = (255, 255, 255)
-            if amount < 100:  # Low resource warning
-                color = (255, 200, 200)
-            self.draw_text(screen, text, 10, y, color)
-            y += 25
-            
-        # Render colony stats
+            color = (255, 200, 200) if amount < 100 else (255, 255, 255)
+            self.draw_text(screen, text, resource_x, resource_y, color)
+            resource_y += 25
+
+        # Colony needs section (separated from resources)
+        needs_x = 200  # Moved to right of resources
+        needs_y = 10
         stats = self.world.building_requirements
         if stats:
-            self.draw_text(screen, f"Housing needed: {stats['housing']}", 10, y, (255, 255, 255))
-            y += 25
-            self.draw_text(screen, f"Jobs needed: {stats['jobs']}", 10, y, (255, 255, 255))
-            y += 25
-            self.draw_text(screen, f"Average happiness: {stats['happiness']:.1f}%", 10, y, (255, 255, 255))
+            self.draw_text(screen, f"Housing needed: {stats['housing']}", needs_x, needs_y, (255, 255, 255))
+            needs_y += 25
+            self.draw_text(screen, f"Jobs needed: {stats['jobs']}", needs_x, needs_y, (255, 255, 255))
+            needs_y += 25
+            self.draw_text(screen, f"Average happiness: {stats['happiness']:.1f}%", needs_x, needs_y, (255, 255, 255))
 
     def _render_building_menu(self, screen):
-        """Render the building placement menu"""
-        menu_rect = pygame.Rect(screen.get_width() - 200, 0, 200, screen.get_height())
-        pygame.draw.rect(screen, (0, 0, 0, 180), menu_rect)
+        """Render building menu with improved resource information"""
+        menu_width = 250
+        menu_rect = pygame.Rect(screen.get_width() - menu_width, 0, menu_width, screen.get_height())
         
-        y = 10
+        # Semi-transparent background
+        s = pygame.Surface((menu_width, screen.get_height()))
+        s.set_alpha(200)
+        s.fill((20, 20, 30))
+        screen.blit(s, menu_rect)
+        
+        # Draw title
+        title = self.font.render("Buildings", True, (200, 200, 255))
+        screen.blit(title, (menu_rect.x + 10, 10))
+        
+        # Draw resource status bar at top
+        resource_y = 40
+        for resource, amount in self.world.colony_inventory.items():
+            text = f"{resource.title()}: {amount:.1f}"
+            color = (255, 100, 100) if amount < 100 else (255, 255, 255)
+            self.draw_text(screen, text, menu_rect.x + 10, resource_y, color, size=20)
+            resource_y += 20
+        
+        # Draw building options
+        y = resource_y + 20
         for building_type, data in BUILDING_TYPES.items():
-            button_rect = pygame.Rect(menu_rect.x + 10, y, 180, 40)
-            color = (100, 100, 200) if building_type == self.selected_building_type else (70, 70, 70)
+            button_height = 80
+            button_rect = pygame.Rect(menu_rect.x + 10, y, menu_width - 20, button_height)
+            
+            # Check if can afford
+            can_afford = True
+            for resource, amount in data.get('cost', {}).items():
+                if self.world.colony_inventory.get(resource, 0) < amount:
+                    can_afford = False
+                    break
+            
+            # Background color based on selection and affordability
+            if building_type == self.selected_building_type:
+                color = (100, 100, 200)
+            else:
+                color = (60, 60, 80) if can_afford else (60, 30, 30)
+            
             pygame.draw.rect(screen, color, button_rect)
+            pygame.draw.rect(screen, (100, 100, 150), button_rect, 1)
             
-            # Draw building name and cost
-            self.draw_text(screen, building_type.title(), button_rect.x + 5, y + 5, (255, 255, 255))
-            cost_text = ", ".join(f"{amount} {res}" for res, amount in data.get('cost', {}).items())
-            self.draw_text(screen, cost_text, button_rect.x + 5, y + 22, (200, 200, 200), size=12)
+            # Building name
+            self.draw_text(screen, building_type.title(), button_rect.x + 5, y + 5, (255, 255, 255), size=20)
             
-            # Handle click
+            # Production info
+            if 'produces' in data:
+                prod_text = f"Produces: {data['produces']}"
+                self.draw_text(screen, prod_text, button_rect.x + 5, y + 25, (200, 255, 200), size=16)
+            
+            # Cost info
+            cost_text = "Cost: " + ", ".join(f"{amount} {res}" for res, amount in data.get('cost', {}).items())
+            self.draw_text(screen, cost_text, button_rect.x + 5, y + 45, (200, 200, 200), size=16)
+            
+            # Jobs info
+            if 'max_jobs' in data:
+                jobs_text = f"Jobs: {data['max_jobs']}"
+                self.draw_text(screen, jobs_text, button_rect.x + 5, y + 65, (200, 200, 255), size=16)
+            
             if button_rect.collidepoint(pygame.mouse.get_pos()):
                 self.tooltip_text = data.get('description', '')
                 if pygame.mouse.get_pressed()[0]:
                     self.selected_building_type = building_type
             
-            y += 50
+            y += button_height + 5
 
     def _render_building_preview(self, screen):
         """Render building placement preview"""
@@ -706,11 +758,17 @@ class UI:
             self.tooltip_text = message
 
     def _render_alerts(self, screen):
-        """Render resource and need alerts"""
-        y = screen.get_height() - 100
+        """Render alerts in bottom-left corner with improved visibility"""
+        alert_y = screen.get_height() - (len(self.world.resource_alerts) * 25 + 10)
         for alert in self.world.resource_alerts:
-            self.draw_text(screen, alert, 10, y, (255, 100, 100))
-            y += 25
+            # Create a semi-transparent background for better readability
+            text_surface = self.font.render(alert, True, (255, 100, 100))
+            background = pygame.Surface((text_surface.get_width() + 20, 24))
+            background.set_alpha(128)
+            background.fill((0, 0, 0))
+            screen.blit(background, (5, alert_y - 2))
+            self.draw_text(screen, alert, 10, alert_y, (255, 100, 100))
+            alert_y += 25
 
     def _render_tooltip(self, screen):
         """Render tooltip with building suggestions"""

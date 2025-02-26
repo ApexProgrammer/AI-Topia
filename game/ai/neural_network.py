@@ -48,9 +48,53 @@ class ColonistBrain:
         return output
 
     def decide_action(self, state):
-        """Convert state to numpy array and get action prediction"""
+        """Convert state to numpy array and get action prediction with enhanced resource gathering priority"""
         state_array = np.array(state).reshape(1, -1)
         action_probs = self.forward(state_array)
+        
+        # Extract relevant state information
+        colony_resources = state_array[0][5]  # Resource level from state
+        has_job = state_array[0][7]  # Job status from state
+        energy = state_array[0][3]  # Energy level from state
+        happiness = state_array[0][6]  # Happiness level from state
+        
+        # Critical resource gathering priorities
+        if colony_resources < 0.3:  # Less than 30% resources
+            action_probs[0][3] *= 2.5  # Significantly increase probability of gathering resources
+            if has_job:
+                action_probs[0][3] *= 1.5  # Additional boost if already has a job
+        elif colony_resources < 0.5:  # Less than 50% resources
+            action_probs[0][3] *= 1.8  # Moderately increase gathering probability
+        
+        # Job seeking behavior
+        if not has_job:
+            if colony_resources < 0.5:
+                action_probs[0][0] *= 2.0  # Double probability of finding job when resources are needed
+            else:
+                action_probs[0][0] *= 1.5  # Regular job-seeking priority
+        
+        # Energy management
+        if energy < 0.2:  # Very low energy
+            action_probs[0][2] *= 2.0  # Double resting probability
+            action_probs[0][3] *= 0.3  # Significantly reduce working probability
+        elif energy < 0.4:  # Moderately low energy
+            action_probs[0][2] *= 1.5  # Increase resting probability
+            action_probs[0][3] *= 0.7  # Slightly reduce working probability
+        
+        # Happiness consideration
+        if happiness < 0.4:  # Low happiness
+            action_probs[0][4] *= 1.5  # Increase socializing probability
+            action_probs[0][5] *= 1.3  # Increase shopping probability
+        
+        # Normalize probabilities
+        action_probs = action_probs / np.sum(action_probs)
+        
+        # Add small random variation to prevent getting stuck in patterns
+        action_probs += np.random.normal(0, 0.05, action_probs.shape)
+        action_probs = np.maximum(action_probs, 0)  # Ensure no negative probabilities
+        action_probs = action_probs / np.sum(action_probs)  # Renormalize
+        
+        # Choose action based on modified probabilities
         action = np.random.choice(OUTPUT_SIZE, p=action_probs[0])
         return action
 

@@ -189,16 +189,25 @@ class Colonist:
         self.happiness = max(0, min(100, self.happiness))
 
     def seek_job(self):
-        """Find and move to an available job"""
+        """Find and move to an available job with enhanced resource production priority"""
         if not self.job and WORKING_AGE <= self.age <= RETIREMENT_AGE:
             available_jobs = self.world.get_available_jobs()
             if available_jobs:
-                # Filter jobs by skills and traits
+                # Filter jobs by skills and traits with resource production priority
                 suitable_jobs = []
                 for job in available_jobs:
                     score = 0
+                    # Base score from traits
                     if job.type == 'farmer':
-                        score = self.traits['work_ethic']
+                        score = self.traits['work_ethic'] * 1.2  # Priority for food production
+                    elif job.type == 'wood_gatherer':
+                        score = (self.traits['work_ethic'] + self.traits['intelligence']) / 2 * 1.1
+                    elif job.type == 'stone_gatherer':
+                        score = (self.traits['work_ethic'] + self.traits['intelligence']) / 2 * 1.1
+                    elif job.type == 'metal_gatherer':
+                        score = (self.traits['work_ethic'] + self.traits['intelligence']) / 2 * 1.1
+                    elif job.type == 'goods_worker':
+                        score = (self.traits['creativity'] + self.traits['intelligence']) / 2 * 1.15
                     elif job.type == 'factory_worker':
                         score = (self.traits['work_ethic'] + self.traits['intelligence']) / 2
                     elif job.type == 'shopkeeper':
@@ -208,7 +217,17 @@ class Colonist:
                     elif job.type == 'government_worker':
                         score = (self.traits['intelligence'] + self.traits['leadership']) / 2
                     
-                    if score > 50:  # Only consider jobs they're good at
+                    # Additional score based on colony needs
+                    if hasattr(job.building, 'produces'):
+                        resource = job.building.produces
+                        if resource in self.world.colony_inventory:
+                            current_amount = self.world.colony_inventory[resource]
+                            if current_amount < 100:  # Low resource threshold
+                                score *= 1.5  # Significant boost for needed resources
+                            elif current_amount < 200:  # Medium resource threshold
+                                score *= 1.2  # Moderate boost
+                    
+                    if score > 40:  # Lowered threshold to ensure more job assignments
                         suitable_jobs.append((job, score))
                 
                 if suitable_jobs:
@@ -594,50 +613,67 @@ class Colonist:
         if not self.job:
             return
             
-        # Calculate base efficiency from traits and energy
+        # Calculate base efficiency from traits and energy with improved weights
         efficiency = (
-            (self.traits['work_ethic'] / 100) * 0.4 +  # Work ethic contribution
-            (self.energy / 100) * 0.3 +                # Energy level contribution
-            (self.happiness / 100) * 0.2 +             # Happiness bonus
-            (self.traits['intelligence'] / 100) * 0.1   # Skill bonus
+            (self.traits['work_ethic'] / 100) * 0.5 +    # Increased work ethic importance
+            (self.energy / 100) * 0.2 +                  # Energy level contribution
+            (self.happiness / 100) * 0.2 +               # Happiness bonus
+            (self.traits['intelligence'] / 100) * 0.1    # Skill bonus
         )
         
-        # Job-specific trait bonuses
+        # Enhanced job-specific trait bonuses
         if hasattr(self.job, 'type'):
-            if self.job.type == 'farm_worker':
-                efficiency *= 1 + (self.traits['work_ethic'] / 200)  # Up to 50% bonus
-            elif self.job.type == 'mine_worker':
-                efficiency *= 1 + (self.traits['intelligence'] / 200)
-            elif self.job.type == 'woodcutter_worker':
-                efficiency *= 1 + (self.traits['work_ethic'] / 150)
-            elif self.job.type == 'workshop_worker':
-                efficiency *= 1 + (self.traits['creativity'] / 150)
+            if self.job.type == 'farmer':
+                efficiency *= 1.2  # Increased farming efficiency
+            elif self.job.type == 'wood_gatherer':
+                efficiency *= 1.15
+            elif self.job.type == 'stone_gatherer':
+                efficiency *= 1.1
+            elif self.job.type == 'metal_gatherer':
+                efficiency *= 1.1
+            elif self.job.type == 'goods_worker':
+                efficiency *= 1.15
         
-        # Proximity bonus for resource gathering
+        # Enhanced proximity bonus for resource gathering
         if hasattr(self.job, 'building'):
             distance = ((self.x - self.job.building.x)**2 + 
                        (self.y - self.job.building.y)**2)**0.5
             if distance < 50:  # Close to workplace
-                efficiency *= 1.2
+                efficiency *= 1.3  # Increased proximity bonus
+            elif distance < 100:  # Medium distance
+                efficiency *= 1.1
         
         # Produce resources with calculated efficiency
         if hasattr(self.job, 'produces'):
-            production = self.job.production_rate * efficiency
-            # Add to world's shared inventory instead of personal inventory
+            base_production = self.job.production_rate * efficiency
+            # Add experience bonus (0-20% extra)
+            if hasattr(self, 'work_experience'):
+                experience_bonus = min(0.2, self.work_experience / 500)
+                production = base_production * (1 + experience_bonus)
+            else:
+                production = base_production
+                
+            # Add to world's shared inventory
             self.world.add_to_colony_inventory(self.job.produces, production)
             
-            # Energy cost of gathering
-            self.energy = max(0, self.energy - 0.1)
+            # Energy cost of gathering - reduced for experienced workers
+            energy_cost = 0.1 * (1 - (experience_bonus if hasattr(self, 'work_experience') else 0))
+            self.energy = max(0, self.energy - energy_cost)
             
             # Small happiness boost from successful gathering
-            if random.random() < 0.1:  # 10% chance per gather
+            if random.random() < 0.15:  # Increased chance for happiness boost
                 self.happiness = min(100, self.happiness + 1)
             
-            # Earn money for work
+            # Earn money for work with efficiency bonus
             base_salary = JOB_SALARIES.get(self.job.type, MINIMUM_WAGE)
-            earned = (base_salary / 30) * efficiency  # Daily wage
+            earned = (base_salary / 30) * efficiency * (1 + experience_bonus if hasattr(self, 'work_experience') else 1)
             self.money += earned
             self.inventory['money'] = self.money
+            
+            # Increment work experience
+            if not hasattr(self, 'work_experience'):
+                self.work_experience = 0
+            self.work_experience += 0.1
 
     def visit_nearest_shop(self):
         """Find and move to the nearest shop"""

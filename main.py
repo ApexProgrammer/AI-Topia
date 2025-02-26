@@ -31,7 +31,7 @@ class Game:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
-            self.ui.handle_input(event)
+            self.ui.handle_event(event)  # Changed from handle_input to handle_event
             self.world.handle_input(event)  # Updated to match new method name
 
     def update(self):

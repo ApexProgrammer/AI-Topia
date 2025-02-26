@@ -97,7 +97,7 @@ class World:
         return (x, y) if y is not None else x
 
     def screen_to_world(self, pos):
-        """Convert screen coordinates to world coordinates"""
+        """Convert screen coordinates to world coordinates with precise grid alignment"""
         if isinstance(pos, tuple):
             x, y = pos
         else:
@@ -108,12 +108,17 @@ class World:
             # Account for centered world offset
             x = x - (self.screen_width - self.width) // 2
             if y is not None:
-                y = x - (self.screen_height - self.height) // 2
+                y = y - (self.screen_height - self.height) // 2
+        
+        # Snap to grid
+        x = (x // TILE_SIZE) * TILE_SIZE
+        if y is not None:
+            y = (y // TILE_SIZE) * TILE_SIZE
         
         return (x, y) if y is not None else x
 
     def get_grid_position(self, x, y=None):
-        """Convert world coordinates to grid coordinates"""
+        """Convert world coordinates to grid coordinates with proper alignment"""
         if y is None and isinstance(x, (tuple, list)):
             x, y = x
         
@@ -121,17 +126,21 @@ class World:
             # Remove centering offset
             x = x - (self.screen_width - self.width) // 2
             y = y - (self.screen_height - self.height) // 2
-            
-        return (int(x / TILE_SIZE), int(y / TILE_SIZE))
+        
+        # Ensure perfect grid alignment
+        grid_x = max(0, min(self.current_size - 1, x // TILE_SIZE))
+        grid_y = max(0, min(self.current_size - 1, y // TILE_SIZE))
+        
+        return (int(grid_x), int(grid_y))
 
     def get_pixel_position(self, x, y=None):
         """Convert grid coordinates to world coordinates (center of tile)"""
         if y is None and isinstance(x, (tuple, list)):
             x, y = x
             
-        # Convert to pixel coordinates
-        world_x = x * TILE_SIZE + TILE_SIZE // 2
-        world_y = y * TILE_SIZE + TILE_SIZE // 2
+        # Convert to pixel coordinates - align to grid perfectly
+        world_x = (x * TILE_SIZE)
+        world_y = (y * TILE_SIZE)
         
         if self.screen_width and self.screen_height:
             # Add centering offset
@@ -342,47 +351,50 @@ class World:
         for (grid_x, grid_y), scores in self.building_zones.items():
             if not scores:
                 continue
-                
+            
             pixel_x, pixel_y = self.get_pixel_position(grid_x, grid_y)
             screen_x = int((pixel_x + camera_x) * zoom)
             screen_y = int((pixel_y + camera_y) * zoom)
             
-            # If a building type is selected, only show scores for that type
+            # If a specific building type is selected, only show scores for that type
             if selected_type:
                 if selected_type in scores:
                     score = scores[selected_type]
-                    alpha = int(score * 2.55)  # Convert 0-100 to 0-255
+                    # Use score to determine opacity
+                    alpha = int(max(40, min(180, score * 1.8)))  # Score 0-100 maps to alpha 40-180
                     color = (0, 255, 0, alpha)  # Green with variable transparency
                     
-                    s = pygame.Surface((TILE_SIZE, TILE_SIZE))
+                    s = pygame.Surface((TILE_SIZE * zoom, TILE_SIZE * zoom))
                     s.set_alpha(alpha)
                     s.fill((0, 255, 0))
-                    screen.blit(s, (screen_x - TILE_SIZE//2, screen_y - TILE_SIZE//2))
+                    screen.blit(s, (screen_x, screen_y))
             else:
                 # Show best building type for each zone
-                best_type = max(scores.items(), key=lambda x: x[1])[0]
-                score = scores[best_type]
+                best_type, score = max(scores.items(), key=lambda x: x[1])
                 if score > 50:  # Only show high-scoring suggestions
+                    # Color code based on building type
                     color = {
-                        'house': (100, 200, 255),
-                        'farm': (100, 255, 100),
-                        'woodcutter': (139, 69, 19),
-                        'quarry': (169, 169, 169),
-                        'mine': (105, 105, 105),
-                        'workshop': (200, 200, 100),
-                        'market': (255, 200, 100),
-                        'tavern': (255, 100, 255)
+                        'house': (100, 200, 255),      # Blue for residential
+                        'farm': (100, 255, 100),       # Green for food production
+                        'woodcutter': (139, 69, 19),   # Brown for resource gathering
+                        'quarry': (169, 169, 169),     # Grey for mining
+                        'mine': (105, 105, 105),       # Dark grey for mining
+                        'workshop': (200, 200, 100),   # Yellow for crafting
+                        'market': (255, 200, 100),     # Orange for commerce
+                        'tavern': (255, 100, 255)      # Purple for entertainment
                     }.get(best_type, (200, 200, 200))
                     
-                    s = pygame.Surface((TILE_SIZE, TILE_SIZE))
-                    s.set_alpha(100)
+                    alpha = int(max(40, min(180, score * 1.8)))
+                    s = pygame.Surface((TILE_SIZE * zoom, TILE_SIZE * zoom))
+                    s.set_alpha(alpha)
                     s.fill(color)
-                    screen.blit(s, (screen_x - TILE_SIZE//2, screen_y - TILE_SIZE//2))
+                    screen.blit(s, (screen_x, screen_y))
                     
                     # Draw small indicator of building type
-                    indicator = self.font.render(best_type[0].upper(), True, (255, 255, 255))
-                    screen.blit(indicator, (screen_x - indicator.get_width()//2, 
-                                         screen_y - indicator.get_height()//2))
+                    if zoom >= 0.8:  # Only show text at reasonable zoom levels
+                        indicator = self.font.render(best_type[0].upper(), True, (255, 255, 255))
+                        screen.blit(indicator, (screen_x + (TILE_SIZE * zoom)/2 - indicator.get_width()/2, 
+                                             screen_y + (TILE_SIZE * zoom)/2 - indicator.get_height()/2))
 
     def update(self, speed_multiplier=1.0):
         """Update world state with improved resource management"""
@@ -927,45 +939,68 @@ class World:
             
         # Check resource costs
         building_costs = BUILDING_TYPES[building_type].get('cost', {})
+        missing_resources = []
         for resource, amount in building_costs.items():
             if self.colony_inventory.get(resource, 0) < amount:
-                return False, f"Insufficient {resource}"
-                
-        # Check terrain and spacing
+                missing_resources.append(f"{resource}: {amount - self.colony_inventory.get(resource, 0)}")
+        
+        if missing_resources:
+            return False, f"Missing resources: {', '.join(missing_resources)}"
+            
+        # Convert to grid coordinates for validation
         grid_x, grid_y = self.get_grid_position(x, y)
         if not self.is_valid_building_location(grid_x, grid_y, building_type):
+            nearby_buildings = False
+            # Check if there are buildings too close
+            size = BUILDING_TYPES[building_type]['size']
+            for dx in range(-MIN_BUILDING_SPACING, size + MIN_BUILDING_SPACING):
+                for dy in range(-MIN_BUILDING_SPACING, size + MIN_BUILDING_SPACING):
+                    check_x = grid_x + dx
+                    check_y = grid_y + dy
+                    if (0 <= check_x < self.current_size and 
+                        0 <= check_y < self.current_size):
+                        if self.is_grid_occupied(check_x, check_y):
+                            nearby_buildings = True
+                            break
+            
+            if nearby_buildings:
+                return False, "Too close to other buildings"
             return False, "Invalid location"
             
-        return True, "Can build"
-        
+        return True, "Can build here"
+
     def build_structure(self, building_type, x, y):
         """Place a new building (called by UI/player)"""
         can_build, message = self.can_build(building_type, x, y)
         if not can_build:
             return False, message
             
-        # Deduct resources
-        building_costs = BUILDING_TYPES[building_type].get('cost', {})
-        for resource, amount in building_costs.items():
-            self.colony_inventory[resource] -= amount
-            
         # Create building
         building = Building(building_type=building_type, x=x, y=y, world=self)
         self.buildings.append(building)
         
-        # Update appropriate lists
+        # Update grid occupation
         grid_x, grid_y = self.get_grid_position(x, y)
         building_size = BUILDING_TYPES[building_type]['size']
         for dx in range(building_size):
             for dy in range(building_size):
                 self.add_to_grid(building, grid_x + dx, grid_y + dy)
         
+        # Deduct resources after successful placement
+        building_costs = BUILDING_TYPES[building_type].get('cost', {})
+        for resource, amount in building_costs.items():
+            self.colony_inventory[resource] -= amount
+        
+        # Add to appropriate lists
         if building_type == 'house':
             self.homes.append(building)
         elif building_type in ['shop', 'factory', 'farm', 'bank', 'government']:
             self.jobs.extend(building.create_jobs())
-            
-        return True, "Building placed"
+        
+        # Update building zones after placement
+        self.update_building_zones()
+        
+        return True, "Building placed successfully"
 
     def update_colony_needs(self):
         """Enhanced colony needs tracking with improved resource management"""
@@ -1035,14 +1070,34 @@ class World:
                 self.resource_alerts.append(f"Notice: {resource} consumption exceeds production")
 
     def update_building_zones(self):
-        """Update suggested building zones based on resources and efficiency"""
+        """Update suggested building zones based on colony needs and efficiency"""
+        # Only update zones periodically to improve performance and reduce flashing
+        if not hasattr(self, '_last_zone_update'):
+            self._last_zone_update = 0
+        
+        current_time = pygame.time.get_ticks()
+        if current_time - self._last_zone_update < 1000:  # Update every second instead of every frame
+            return
+        
+        self._last_zone_update = current_time
         self.building_zones.clear()
         
-        for grid_x in range(self.current_size):
-            for grid_y in range(self.current_size):
-                zone_score = self._calculate_zone_score(grid_x, grid_y)
-                if zone_score:
-                    self.building_zones[(grid_x, grid_y)] = zone_score
+        # Calculate zones around the current viewport
+        if self.ui:
+            viewport_center_x = -self.ui.camera_x / TILE_SIZE
+            viewport_center_y = -self.ui.camera_y / TILE_SIZE
+            visible_range = int(15 / self.ui.zoom)  # Adjust range based on zoom level
+            
+            min_x = max(0, int(viewport_center_x - visible_range))
+            max_x = min(self.current_size, int(viewport_center_x + visible_range))
+            min_y = max(0, int(viewport_center_y - visible_range))
+            max_y = min(self.current_size, int(viewport_center_y + visible_range))
+            
+            for grid_x in range(min_x, max_x):
+                for grid_y in range(min_y, max_y):
+                    zone_score = self._calculate_zone_score(grid_x, grid_y)
+                    if zone_score:
+                        self.building_zones[(grid_x, grid_y)] = zone_score
 
     def _calculate_zone_score(self, grid_x, grid_y):
         """Calculate building type scores for a given position"""
@@ -1052,47 +1107,50 @@ class World:
         scores = {}
         pixel_x, pixel_y = self.get_pixel_position(grid_x, grid_y)
         
-        # Check housing zones (near jobs and resources)
-        nearby_jobs = 0
-        for building in self.buildings:
-            if hasattr(building, 'jobs'):
-                distance = ((building.x - pixel_x)**2 + (building.y - pixel_y)**2)**0.5
-                if distance < 200:  # Within walking distance
-                    nearby_jobs += len(building.jobs)
+        # Basic validation for all building types
+        if not self.is_valid_building_location(grid_x, grid_y, 'house'):  # Use house as base size
+            return None
+        
+        # Calculate population density
+        nearby_colonists = sum(1 for colonist in self.colonists
+                              if ((colonist.x - pixel_x)**2 + (colonist.y - pixel_y)**2)**0.5 < 300)
+        population_factor = min(1.0, nearby_colonists / 20)
+        
+        # Score residential zones
+        nearby_jobs = sum(len(building.jobs) for building in self.buildings
+                         if ((building.x - pixel_x)**2 + (building.y - pixel_y)**2)**0.5 < 200
+                         and hasattr(building, 'jobs'))
         if nearby_jobs > 0:
             scores['house'] = min(100, nearby_jobs * 10)
-            
-        # Resource gathering buildings
-        resource_buildings = {
-            'farm': 0,
-            'woodcutter': 0,
-            'quarry': 0,
-            'mine': 0
-        }
         
+        # Score commercial zones
+        if population_factor > 0.3:
+            scores['market'] = min(90, population_factor * 100)
+            scores['tavern'] = min(85, population_factor * 90)
+        
+        # Score production zones
+        resource_buildings = {'farm': 0, 'woodcutter': 0, 'quarry': 0, 'mine': 0}
         for building in self.buildings:
             if building.building_type in resource_buildings:
                 distance = ((building.x - pixel_x)**2 + (building.y - pixel_y)**2)**0.5
-                if distance < 300:  # Resource competition radius
+                if distance < 300:
                     resource_buildings[building.building_type] += 1
-                    
-        # Score resource buildings based on existing competition
-        for building_type in resource_buildings:
-            if resource_buildings[building_type] < 3:  # Allow up to 3 of each type in an area
-                scores[building_type] = 80 - (resource_buildings[building_type] * 20)
-                
-        # Score workshops near resource buildings
+        
+        # Add production building scores based on existing density
+        for building_type, count in resource_buildings.items():
+            if count < 3:  # Allow up to 3 of each type in an area
+                base_score = 80 - (count * 20)
+                # Adjust score based on colony needs
+                if building_type == 'farm' and self.colony_inventory.get('food', 0) < len(self.colonists) * 5:
+                    base_score += 20
+                elif building_type == 'woodcutter' and self.colony_inventory.get('wood', 0) < 100:
+                    base_score += 15
+                scores[building_type] = base_score
+        
+        # Score industrial zones
         if any(count > 0 for count in resource_buildings.values()):
             scores['workshop'] = 70
-            
-        # Score markets and taverns based on population density
-        nearby_houses = len([b for b in self.buildings 
-                           if b.building_type == 'house' and
-                           ((b.x - pixel_x)**2 + (b.y - pixel_y)**2)**0.5 < 250])
-        if nearby_houses > 0:
-            scores['market'] = min(90, nearby_houses * 15)
-            scores['tavern'] = min(85, nearby_houses * 12)
-            
+        
         return scores if scores else None
 
     def handle_input(self, event):
@@ -1123,22 +1181,26 @@ class World:
             return False
             
         building_size = BUILDING_TYPES[building_type]['size']
+        spacing = MIN_BUILDING_SPACING
         
-        # Check if location is within bounds
-        if (grid_x < 0 or grid_x + building_size > self.current_size or
-            grid_y < 0 or grid_y + building_size > self.current_size):
+        # Check if location is within bounds with proper margins
+        if (grid_x < spacing or grid_x + building_size > self.current_size - spacing or
+            grid_y < spacing or grid_y + building_size > self.current_size - spacing):
             return False
         
         # Check if area is clear including spacing
-        for dx in range(-MIN_BUILDING_SPACING, building_size + MIN_BUILDING_SPACING):
-            for dy in range(-MIN_BUILDING_SPACING, building_size + MIN_BUILDING_SPACING):
+        for dx in range(-spacing, building_size + spacing):
+            for dy in range(-spacing, building_size + spacing):
                 check_x = grid_x + dx
                 check_y = grid_y + dy
                 
-                # Only check spacing within world bounds
+                # Check spacing within world bounds
                 if (0 <= check_x < self.current_size and 
                     0 <= check_y < self.current_size):
                     if self.is_grid_occupied(check_x, check_y):
-                        return False
+                        # Allow overlapping with non-building entities
+                        occupants = self.get_grid_occupants(check_x, check_y)
+                        if any(isinstance(occupant, Building) for occupant in occupants):
+                            return False
         
         return True

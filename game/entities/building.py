@@ -239,72 +239,60 @@ class Building:
         return jobs
 
     def render(self, screen, camera_x=0, camera_y=0, zoom=1.0):
-        """Render building with camera transformations"""
+        """Render building with improved visual feedback"""
         # Calculate screen position
-        screen_x = int((self.x + camera_x) * zoom)
-        screen_y = int((self.y + camera_y) * zoom)
-        size = int(self.size * TILE_SIZE * zoom)
+        screen_x = (self.x - camera_x) * zoom
+        screen_y = (self.y - camera_y) * zoom
         
-        # Draw building
-        rect = pygame.Rect(screen_x - size//2, screen_y - size//2, size, size)
+        # Calculate size based on building configuration
+        total_size = self.base_size * zoom
         
+        # Draw building base
+        color = self.colors.get(self.building_type, (200, 200, 200))
         if not self.is_complete:
             # Show construction progress
             progress = self.construction_progress / self.build_time
-            progress_height = size * progress
-            progress_rect = pygame.Rect(screen_x - size//2, 
-                                      screen_y + size//2 - progress_height,
-                                      size, progress_height)
-            pygame.draw.rect(screen, (150, 150, 150), rect)
-            pygame.draw.rect(screen, (100, 200, 100), progress_rect)
-        else:
-            # Draw completed building
-            if self.building_type == 'house':
-                color = (100, 200, 100)
-            elif self.building_type == 'farm':
-                color = (150, 200, 50)
-            elif self.building_type == 'factory':
-                color = (150, 150, 150)
-            elif self.building_type == 'shop':
-                color = (200, 150, 100)
-            elif self.building_type == 'bank':
-                color = (200, 200, 50)
-            else:
-                color = (200, 100, 100)
-                
-            pygame.draw.rect(screen, color, rect)
-            
-            # Draw resource indicators
-            if hasattr(self, 'inventory'):
-                bar_width = max(2, int(3 * zoom))
-                for i, (resource, amount) in enumerate(self.inventory.items()):
-                    max_amount = 100
-                    height = min(1.0, amount / max_amount) * size
-                    indicator_rect = pygame.Rect(
-                        screen_x - size//2 + (i+1)*5*zoom,
-                        screen_y + size//2 - height,
-                        bar_width, height
-                    )
-                    pygame.draw.rect(screen, (255, 255, 0), indicator_rect)
+            color = tuple(int(c * (0.5 + 0.5 * progress)) for c in color)
         
-        # Draw outline
-        pygame.draw.rect(screen, (0, 0, 0), rect, max(1, int(2 * zoom)))
+        # Draw with proper grid alignment
+        building_rect = pygame.Rect(screen_x, screen_y, total_size, total_size)
+        pygame.draw.rect(screen, color, building_rect)
         
-        # Draw status indicators
+        # Draw grid lines for multi-tile buildings
+        if self.size > 1:
+            for i in range(self.size + 1):
+                # Vertical lines
+                pygame.draw.line(screen, (100, 100, 100),
+                               (screen_x + i * TILE_SIZE * zoom, screen_y),
+                               (screen_x + i * TILE_SIZE * zoom, screen_y + total_size))
+                # Horizontal lines
+                pygame.draw.line(screen, (100, 100, 100),
+                               (screen_x, screen_y + i * TILE_SIZE * zoom),
+                               (screen_x + total_size, screen_y + i * TILE_SIZE * zoom))
+        
+        # Show building status indicators
         if self.is_complete:
-            if self.building_type == 'house':
-                # Show occupancy
-                occupancy_color = (0, 255, 0) if self.current_occupants < self.capacity else (255, 0, 0)
-                pygame.draw.circle(screen, occupancy_color,
-                                 (screen_x, screen_y - size//2 - 5*zoom),
-                                 max(2, int(3 * zoom)))
-            elif hasattr(self, 'jobs'):
-                # Show employment
-                workers = len([job for job in self.jobs if job.employee])
-                job_color = (0, 255, 0) if workers == self.max_jobs else (255, 255, 0)
-                pygame.draw.circle(screen, job_color,
-                                 (screen_x, screen_y - size//2 - 5*zoom),
-                                 max(2, int(3 * zoom)))
+            if hasattr(self, 'jobs'):
+                # Show employment status for work buildings
+                filled_jobs = len([job for job in self.jobs if job.employee])
+                if self.jobs and filled_jobs < len(self.jobs):
+                    # Draw "Help Wanted" indicator
+                    pygame.draw.circle(screen, (255, 200, 0),
+                                    (int(screen_x + total_size - 5), int(screen_y + 5)), 
+                                    int(3 * zoom))
+            elif self.building_type == 'house':
+                # Show occupancy for houses
+                if self.current_occupants < self.capacity:
+                    # Draw "Vacancy" indicator
+                    pygame.draw.circle(screen, (100, 255, 100),
+                                    (int(screen_x + total_size - 5), int(screen_y + 5)),
+                                    int(3 * zoom))
+        else:
+            # Show construction progress bar
+            progress_width = (total_size - 4) * (self.construction_progress / self.build_time)
+            pygame.draw.rect(screen, (200, 200, 200),
+                            (screen_x + 2, screen_y + total_size - 4,
+                             progress_width, 3 * zoom))
 
     def add_occupant(self):
         """Add an occupant to a house"""

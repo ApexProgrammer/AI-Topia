@@ -1,30 +1,58 @@
 import pygame
 from .config import WINDOW_WIDTH, WINDOW_HEIGHT, BUILDING_TYPES, EXPANSION_COST, TILE_SIZE
 
+# Modern UI color scheme
+COLORS = {
+    'background': (18, 18, 24),
+    'panel': (30, 30, 40),
+    'panel_highlight': (40, 40, 55),
+    'accent': (86, 155, 255),
+    'accent_hover': (120, 180, 255),
+    'text': (255, 255, 255),
+    'text_secondary': (180, 180, 200),
+    'text_header': (200, 200, 255),
+    'success': (100, 200, 100),
+    'warning': (255, 180, 100),
+    'error': (255, 100, 100),
+    'button': (60, 60, 80),
+    'button_hover': (80, 80, 100),
+    'border': (100, 100, 150)
+}
+
 class Button:
     def __init__(self, x, y, width, height, text, color):
         self.rect = pygame.Rect(x, y, width, height)
         self.text = text
+        self.base_color = color
         self.color = color
         self.hovered = False
+        self.active = False
+        self.font = pygame.font.Font(None, 24)
 
     def draw(self, screen):
-        # Draw subtle shadow
-        shadow_rect = self.rect.copy()
-        shadow_rect.x += 3
-        shadow_rect.y += 3
-        pygame.draw.rect(screen, (0,0,0), shadow_rect, border_radius=8)
-        # Use rounded rectangle drawing
-        draw_color = (min(self.color[0] + 20, 255),
-                      min(self.color[1] + 20, 255),
-                      min(self.color[2] + 20, 255)) if self.hovered else self.color
-        pygame.draw.rect(screen, draw_color, self.rect, border_radius=8)
-        pygame.draw.rect(screen, (0, 0, 0), self.rect, 2, border_radius=8)
+        # Determine button color based on state
+        if self.active:
+            color = COLORS['accent']
+        elif self.hovered:
+            color = COLORS['button_hover']
+        else:
+            color = COLORS['button']
         
-        font = pygame.font.Font(None, 24)
-        text_surface = font.render(self.text, True, (255, 255, 255))
+        # Draw button background with rounded corners
+        pygame.draw.rect(screen, color, self.rect, border_radius=4)
+        pygame.draw.rect(screen, COLORS['border'], self.rect, 1, border_radius=4)
+        
+        # Draw text centered
+        text_surface = self.font.render(self.text, True, COLORS['text'])
         text_rect = text_surface.get_rect(center=self.rect.center)
         screen.blit(text_surface, text_rect)
+        
+        # Draw hover effect
+        if self.hovered:
+            s = pygame.Surface((self.rect.width, self.rect.height))
+            s.set_alpha(30)
+            s.fill((255, 255, 255))
+            screen.blit(s, self.rect, special_flags=pygame.BLEND_ADD)
 
 class UI:
     def __init__(self, screen, world):
@@ -48,15 +76,17 @@ class UI:
         self.camera_friction = 0.9
         self.camera_max_speed = 20.0
         
-        # Government interface
+        # Reorganize button layout with better spacing
+        button_width = 100
+        button_spacing = 15
         button_y = 10
-        button_height = 30
         self.buttons = {
-            'policies': Button(10, button_y, 100, button_height, 'Policies', (150, 150, 200)),
-            'election': Button(120, button_y, 100, button_height, 'Elections', (200, 150, 150)),
-            'taxes': Button(230, button_y, 100, button_height, 'Taxes', (150, 200, 150)),
-            'laws': Button(340, button_y, 100, button_height, 'Laws', (200, 200, 150)),
-            'scenario': Button(450, button_y, 100, button_height, 'Scenario', (200, 200, 200))  # new button
+            'policies': Button(10, button_y, button_width, 30, 'Policies', COLORS['button']),
+            'election': Button(10 + (button_width + button_spacing), button_y, button_width, 30, 'Elections', COLORS['button']),
+            'taxes': Button(10 + 2 * (button_width + button_spacing), button_y, button_width, 30, 'Taxes', COLORS['button']),
+            'laws': Button(10 + 3 * (button_width + button_spacing), button_y, button_width, 30, 'Laws', COLORS['button']),
+            'scenario': Button(10 + 4 * (button_width + button_spacing), button_y, button_width, 30, 'Scenario', COLORS['button']),
+            'build': Button(10 + 5 * (button_width + button_spacing), button_y, button_width, 30, 'Build', COLORS['button'])
         }
         
         # Policy and law settings
@@ -115,9 +145,9 @@ class UI:
         self.UPDATE_INTERVAL = 30  # Update suggestions every 30 frames
 
     def handle_event(self, event):
+        """Main event handler for all UI interactions"""
         if event.type == pygame.MOUSEBUTTONDOWN:
             mouse_pos = pygame.mouse.get_pos()
-            screen_pos = self.screen_to_world(mouse_pos)
             
             # Handle button clicks
             for button_type, button in self.buttons.items():
@@ -126,55 +156,58 @@ class UI:
                         self.policy_menu_open = not self.policy_menu_open
                         self.law_menu_open = False
                         self.show_election_info = False
+                        self.show_building_menu = False
                     elif button_type == 'election':
                         self.show_election_info = not self.show_election_info
                         self.policy_menu_open = False
                         self.law_menu_open = False
+                        self.show_building_menu = False
                     elif button_type == 'taxes':
-                        # Toggle tax adjustment interface
                         self.policy_menu_open = True
                         self.law_menu_open = False
                         self.show_election_info = False
+                        self.show_building_menu = False
                     elif button_type == 'laws':
                         self.law_menu_open = not self.law_menu_open
                         self.policy_menu_open = False
                         self.show_election_info = False
+                        self.show_building_menu = False
                     elif button_type == 'scenario':
-                        # Manually trigger a new scenario if one is not active
                         if not self.world.scenario_manager.active_scenario:
                             self.world.scenario_manager.trigger_scenario()
-                        return
+                    elif button_type == 'build':
+                        self.show_building_menu = not self.show_building_menu
+                        if not self.show_building_menu:
+                            self.selected_building_type = None
+                            self.tooltip_text = None
+                        else:
+                            self.world.update_building_zones()
+                            self.selected_building_type = None
                     return
-            
-            # Handle policy adjustments
+
+            # Handle policy menu clicks
             if self.policy_menu_open:
                 self.handle_policy_click(mouse_pos)
+            
+            # Handle law menu clicks
             elif self.law_menu_open:
                 self.handle_law_click(mouse_pos)
-            else:
-                # Handle colonist selection
-                self.show_colonist_info = False
-                self.selected_colonist = None
-                for colonist in self.world.colonists:
-                    dx = colonist.x - screen_pos[0]
-                    dy = colonist.y - screen_pos[1]
-                    if (dx*dx + dy*dy) < 100:  # Click radius
-                        self.selected_colonist = colonist
-                        self.show_colonist_info = True
-                        break
             
             # Handle building placement
-            if event.button == 1:  # Left click
-                if self.selected_building_type and self.hovering_grid_pos:
-                    # Try to place building
-                    x, y = self.world.get_pixel_position(*self.hovering_grid_pos)
-                    success, message = self.world.build_structure(self.selected_building_type, x, y)
-                    if not success:
-                        self.tooltip_text = message
-            elif event.button == 3:  # Right click
-                self.show_building_menu = not self.show_building_menu
-                self.selected_building_type = None
-        
+            elif self.show_building_menu:
+                if event.button == 1:  # Left click
+                    if self.selected_building_type and self.hovering_grid_pos:
+                        x, y = self.world.get_pixel_position(*self.hovering_grid_pos)
+                        success, message = self.world.build_structure(self.selected_building_type, x, y)
+                        if success:
+                            self.world.update_building_zones()
+                            self.world.update_colony_needs()
+                            self.tooltip_text = self.generate_building_suggestion()
+                        else:
+                            self.tooltip_text = message
+                elif event.button == 3:  # Right click
+                    self.selected_building_type = None
+
         elif event.type == pygame.MOUSEMOTION:
             # Update button hover states
             mouse_pos = pygame.mouse.get_pos()
@@ -190,18 +223,14 @@ class UI:
                 self.target_zoom = min(2.0, self.zoom + 0.2)
             elif event.key == pygame.K_MINUS:
                 self.target_zoom = max(0.5, self.zoom - 0.2)
-            
-            # If a scenario is active, allow decisions via number keys
-            if self.world.scenario_manager.active_scenario:
-                if event.key == pygame.K_1:
-                    self.world.scenario_manager.choose_option(0)
-                elif event.key == pygame.K_2:
-                    self.world.scenario_manager.choose_option(1)
-                # Add additional keys if more options are added
-        
-        elif event.type == pygame.KEYUP:
-            if event.key in self.keys_pressed:
-                self.keys_pressed[event.key] = False
+            elif event.key == pygame.K_ESCAPE:
+                # Close all menus
+                self.show_building_menu = False
+                self.policy_menu_open = False
+                self.law_menu_open = False
+                self.show_election_info = False
+                self.selected_building_type = None
+                self.tooltip_text = None
 
     def handle_policy_click(self, mouse_pos):
         """Enhanced policy interaction handling"""
@@ -277,44 +306,20 @@ class UI:
         if abs(self.zoom - self.target_zoom) > 0.01:
             self.zoom += (self.target_zoom - self.zoom) * self.zoom_speed
 
-        """Update UI state and suggestions"""
-        # Update building zones periodically
-        self.update_timer += 1
-        if self.update_timer >= self.UPDATE_INTERVAL:
-            self.update_timer = 0
-            if self.show_building_menu:
+        # Update UI state
+        if self.show_building_menu:
+            self.update_timer += 1
+            if self.update_timer >= self.UPDATE_INTERVAL:
+                self.update_timer = 0
                 self.world.update_building_zones()
-                self.world.update_colony_needs()
-                self.tooltip_text = self.generate_building_suggestion()
-
-    def handle_input(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            if event.button == 1:  # Left click
-                if self.selected_building_type and self.hovering_grid_pos:
-                    # Attempt to place building
-                    x, y = self.world.get_pixel_position(*self.hovering_grid_pos)
-                    success, message = self.world.build_structure(self.selected_building_type, x, y)
-                    if success:
-                        # Update suggestions immediately after placement
-                        self.world.update_building_zones()
-                        self.world.update_colony_needs()
-                        self.tooltip_text = self.generate_building_suggestion()
-                    else:
-                        self.tooltip_text = message
-            elif event.button == 3:  # Right click
-                self.show_building_menu = not self.show_building_menu
-                self.selected_building_type = None
-                if self.show_building_menu:
-                    self.world.update_building_zones()
-
-        elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE:
-                self.selected_building_type = None
-                self.show_building_menu = False
-            elif event.key == pygame.K_b:
-                self.show_building_menu = not self.show_building_menu
-                if self.show_building_menu:
-                    self.world.update_building_zones()
+                if not self.selected_building_type:
+                    self.tooltip_text = self.generate_building_suggestion()
+        
+        # Update button states
+        self.buttons['policies'].active = self.policy_menu_open
+        self.buttons['election'].active = self.show_election_info
+        self.buttons['laws'].active = self.law_menu_open
+        self.buttons['build'].active = self.show_building_menu
 
     def screen_to_world(self, pos):
         """Convert screen coordinates to world coordinates"""
@@ -327,159 +332,178 @@ class UI:
                 pos[1] * self.zoom + self.camera_y)
 
     def render(self):
-        """Main render function with improved menu positioning"""
+        """Main render function with improved layout and modern styling"""
         # Draw buttons in top-left corner
-        button_y = 10
-        button_x = 10
         for button in self.buttons.values():
-            button.rect.x = button_x
-            button.rect.y = button_y
             button.draw(self.screen)
-            button_x += button.rect.width + 10
 
-        # Draw stats below buttons
-        stats_y = button_y + self.buttons['policies'].rect.height + 20
+        # Stats panel
+        stats_panel_x = 10
+        stats_panel_y = self.buttons['policies'].rect.bottom + 20
+        stats_panel_width = 280
+        stats_spacing = 25
+
+        # Stats content
         stats = [
             f"Population: {len(self.world.colonists)}",
             f"Treasury: ${self.world.treasury:,.2f}",
             f"GDP: ${self.world.gdp:,.2f}",
-            f"Average Happiness: {self.get_average_happiness():,.1f}%",
-            f"Birth Rate: {self.get_birth_rate():,.1f}/year",
-            f"Employment Rate: {self.get_employment_rate():,.1f}%",
-            f"Map Size: {self.world.current_size}x{self.world.current_size}"
+            f"Average Happiness: {self.get_average_happiness():,.1f}%"
         ]
         
+        # Calculate panel heights
+        stats_panel_height = len(stats) * stats_spacing + 20
+        
+        # Draw stats panel background
+        self._draw_panel(stats_panel_x, stats_panel_y, stats_panel_width, stats_panel_height, "Colony Statistics")
+        
+        # Draw stats
         for i, stat in enumerate(stats):
-            text = self.font.render(stat, True, (255, 255, 255))
-            self.screen.blit(text, (10, stats_y + i * 25))
-        
-        # Draw menus - ensure they don't overlap
+            self.draw_text(self.screen, stat, stats_panel_x + 10, stats_panel_y + 30 + i * stats_spacing, COLORS['text'])
+
+        # Resource panel below stats
+        resource_panel_y = stats_panel_y + stats_panel_height + 10
+        self._render_resource_indicators(self.screen, stats_panel_x, resource_panel_y)
+
+        # Organize other UI elements
         if self.policy_menu_open:
-            self.draw_policy_menu()
+            self.draw_policy_menu(self.screen.get_width() - 320, 50)
         elif self.law_menu_open:
-            self.draw_law_menu()
+            self.draw_law_menu(self.screen.get_width() - 320, 50)
         elif self.show_election_info:
-            self.draw_election_info()
-        
-        # Draw colonist info if selected (positioned to not overlap with other menus)
+            self.draw_election_info(self.screen.get_width() - 320, 50)
+
+        # Position colonist info on the left side below resources
         if self.show_colonist_info and self.selected_colonist:
-            self.draw_colonist_info()
-        
-        # Render scenario overlay if active
-        if self.world.scenario_manager.active_scenario:
-            self.world.scenario_manager.render(self.screen, self.font)
-        
-        # Always visible elements
-        self._render_resource_indicators(self.screen)
-        self._render_alerts(self.screen)
-        
-        # Building-related UI elements
+            colonist_panel_y = resource_panel_y + 200  # Adjusted based on resource panel height
+            self.draw_colonist_info(10, colonist_panel_y)
+
+        # Building menu and preview
         if self.show_building_menu:
             self._render_building_menu(self.screen)
-        if self.selected_building_type:
-            self._render_building_preview(self.screen)
-        
-        # Render tooltip last so it's always on top
+            # Always render preview if we have a selected building type
+            if self.selected_building_type:
+                self._render_building_preview(self.screen)
+
+        # Alerts at bottom-left
+        self._render_alerts(self.screen)
+
+        # Tooltips
         if self.tooltip_text:
             self._render_tooltip(self.screen)
 
-    def get_average_happiness(self):
-        if not self.world.colonists:
-            return 0
-        return sum(c.happiness for c in self.world.colonists) / len(self.world.colonists)
+    def _draw_panel(self, x, y, width, height, title=None):
+        """Draw a modern styled panel with optional title"""
+        # Panel background
+        s = pygame.Surface((width, height))
+        s.set_alpha(230)
+        s.fill(COLORS['panel'])
+        self.screen.blit(s, (x, y))
+        
+        # Panel border
+        pygame.draw.rect(self.screen, COLORS['border'], (x, y, width, height), 1)
+        
+        # Title if provided
+        if title:
+            self.draw_text(self.screen, title, x + 10, y + 5, COLORS['text_header'])
 
-    def get_birth_rate(self):
-        """Calculate births per year based on recent history"""
-        if not hasattr(self.world, 'birth_history'):
-            return 0
-            
-        # Calculate births per year based on recent history
-        recent_time = 60 * 60  # Last minute in ticks
-        current_time = pygame.time.get_ticks()
-        recent_births = len([event for event in self.world.birth_history 
-                           if current_time - event['time'] < recent_time])
-        return recent_births * (365 / 60)  # Extrapolate to yearly rate
+    def _render_resource_indicators(self, screen, x, y):
+        """Render resource levels in a modern panel"""
+        resource_spacing = 25
+        padding = 10
+        
+        # Calculate panel dimensions
+        resources = list(self.world.colony_inventory.items())
+        panel_height = (len(resources) + 4) * resource_spacing + padding * 2  # Extra space for needs
+        panel_width = 280
+        
+        # Draw panel background
+        self._draw_panel(x, y, panel_width, panel_height, "Resources & Needs")
+        
+        current_y = y + padding + 25  # Account for title
+        
+        # Draw resources
+        for resource, amount in resources:
+            text = f"{resource.title()}: {amount:.1f}"
+            color = COLORS['error'] if amount < 100 else COLORS['text']
+            self.draw_text(screen, text, x + padding, current_y, color)
+            current_y += resource_spacing
 
-    def get_employment_rate(self):
-        """Calculate the percentage of working-age colonists who have jobs"""
-        from .config import WORKING_AGE, RETIREMENT_AGE
-        working_age_colonists = [c for c in self.world.colonists 
-                               if WORKING_AGE <= c.age <= RETIREMENT_AGE]
-        if not working_age_colonists:
-            return 0
-        employed = len([c for c in working_age_colonists if c.job])
-        return (employed / len(working_age_colonists)) * 100
+        # Draw needs section
+        current_y += resource_spacing/2  # Add some spacing between sections
+        stats = self.world.building_requirements
+        if stats:
+            needs_text = [
+                (f"Housing needed: {stats['housing']}", 'warning' if stats['housing'] > 0 else 'success'),
+                (f"Jobs needed: {stats['jobs']}", 'warning' if stats['jobs'] > 0 else 'success'),
+                (f"Average happiness: {stats['happiness']:.1f}%", 
+                 'success' if stats['happiness'] >= 70 else 'warning')
+            ]
+            for text, status in needs_text:
+                self.draw_text(screen, text, x + padding, current_y, COLORS[status])
+                current_y += resource_spacing
 
-    def get_leader_approval(self):
-        """Calculate the percentage of colonists who support the current leader"""
-        if not self.world.leader or not self.world.colonists or self.world.leader not in self.world.colonists:
-            return 0
-        supporters = len([c for c in self.world.colonists 
-                         if abs(c.political_alignment - self.world.leader.political_alignment) < 0.3])
-        return (supporters / len(self.world.colonists)) * 100
+    def draw_colonist_info(self, x, y):
+        """Draw colonist info panel on the left side"""
+        info_width = 280
+        padding = 10
+        line_height = 25
+        
+        colonist = self.selected_colonist
+        info_lines = [
+            f"Age: {int(colonist.age)}",
+            f"Health: {int(colonist.health)}%",
+            f"Energy: {int(colonist.energy)}%",
+            f"Happiness: {int(colonist.happiness)}%",
+            f"Money: ${colonist.money:,.2f}",
+            "",
+            "Stats:",
+            f"Ambition: {colonist.traits['ambition']}%",
+            f"Sociability: {colonist.traits['sociability']}%",
+            f"Work Ethic: {colonist.traits['work_ethic']}%"
+        ]
+        
+        panel_height = len(info_lines) * line_height + padding * 2
+        
+        # Draw panel background
+        s = pygame.Surface((info_width, panel_height))
+        s.set_alpha(230)
+        s.fill((30, 30, 40))
+        self.screen.blit(s, (x, y))
+        pygame.draw.rect(self.screen, (100, 100, 150), (x, y, info_width, panel_height), 1)
+        
+        # Draw information
+        for i, line in enumerate(info_lines):
+            color = (200, 200, 255) if line.endswith(':') else (255, 255, 255)
+            self.draw_text(self.screen, line, x + padding, y + padding + i * line_height, color)
 
-    def get_political_description(self, alignment):
-        if alignment < 0.2:
-            return "Very Conservative"
-        elif alignment < 0.4:
-            return "Conservative"
-        elif alignment < 0.6:
-            return "Moderate"
-        elif alignment < 0.8:
-            return "Progressive"
-        else:
-            return "Very Progressive"
-
-    def get_term_remaining(self):
-        if not self.world.leader:
-            return 0
-        term_length = 1000  # ticks
-        elapsed = self.world.election_timer
-        return (term_length - elapsed) // 60  # Convert to days
-
-    def draw_policy_menu(self):
-        """Enhanced policy menu with improved visual feedback and positioning"""
+    def draw_policy_menu(self, x, y):
+        """Draw policy menu with improved layout"""
         menu_width = 300
-        menu_x = self.screen.get_width() - menu_width - 10
-        menu_y = 10
         padding = 15
         item_height = 60
         
-        # Calculate total height based on number of items
         height = len(self.policies) * item_height + padding * 2
         
-        # Draw background panel
+        # Draw background
         s = pygame.Surface((menu_width, height))
         s.set_alpha(230)
         s.fill((30, 30, 40))
-        self.screen.blit(s, (menu_x, menu_y))
-        pygame.draw.rect(self.screen, (100, 100, 150), (menu_x, menu_y, menu_width, height), 1)
+        self.screen.blit(s, (x, y))
+        pygame.draw.rect(self.screen, (100, 100, 150), (x, y, menu_width, height), 1)
         
-        # Draw title
-        title = self.font.render("Policy Settings", True, (200, 200, 255))
-        self.screen.blit(title, (menu_x + padding, menu_y + padding))
-        
-        y = menu_y + padding + 30
+        current_y = y + padding
         for policy, value in self.policies.items():
-            # Draw policy name
             name = policy.replace('_', ' ').title()
-            text = self.font.render(name, True, (255, 255, 255))
-            self.screen.blit(text, (menu_x + padding, y))
+            self.draw_text(self.screen, name, x + padding, current_y, (255, 255, 255))
             
             if isinstance(value, bool):
-                # Draw toggle switch
-                self.draw_toggle(menu_x + padding, y + 25, value, "")
+                self.draw_toggle(x + padding, current_y + 25, value, "")
             else:
-                # Draw slider with current value
                 range_info = self.policy_ranges.get(policy, {'min': 0, 'max': 100, 'step': 1, 'format': '{:.0f}'})
-                self.draw_slider(menu_x + padding, y + 25, menu_width - padding * 3, 20, value, range_info)
-                
-                # Draw current value
-                value_text = range_info['format'].format(value)
-                value_surface = self.font.render(value_text, True, (200, 200, 255))
-                self.screen.blit(value_surface, (menu_x + menu_width - padding - value_surface.get_width(), y))
+                self.draw_slider(x + padding, current_y + 25, menu_width - padding * 3, 20, value, range_info)
             
-            y += item_height
+            current_y += item_height
 
     def draw_slider(self, x, y, width, height, value, range_info):
         """Draw an improved slider with better visual feedback"""
@@ -641,28 +665,6 @@ class UI:
             color = (200, 200, 255) if line.endswith(':') else (255, 255, 255)  # Highlight headers
             self.draw_text(self.screen, line, info_x + padding, info_y + padding + i * line_height, color)
 
-    def _render_resource_indicators(self, screen):
-        """Render resource levels and colony statistics in the top-left corner"""
-        # Resources section
-        resource_x = 10
-        resource_y = 10
-        for resource, amount in self.world.colony_inventory.items():
-            text = f"{resource.title()}: {amount:.1f}"
-            color = (255, 200, 200) if amount < 100 else (255, 255, 255)
-            self.draw_text(screen, text, resource_x, resource_y, color)
-            resource_y += 25
-
-        # Colony needs section (separated from resources)
-        needs_x = 200  # Moved to right of resources
-        needs_y = 10
-        stats = self.world.building_requirements
-        if stats:
-            self.draw_text(screen, f"Housing needed: {stats['housing']}", needs_x, needs_y, (255, 255, 255))
-            needs_y += 25
-            self.draw_text(screen, f"Jobs needed: {stats['jobs']}", needs_x, needs_y, (255, 255, 255))
-            needs_y += 25
-            self.draw_text(screen, f"Average happiness: {stats['happiness']:.1f}%", needs_x, needs_y, (255, 255, 255))
-
     def _render_building_menu(self, screen):
         """Render building menu with improved resource information"""
         menu_width = 250
@@ -725,50 +727,84 @@ class UI:
                 jobs_text = f"Jobs: {data['max_jobs']}"
                 self.draw_text(screen, jobs_text, button_rect.x + 5, y + 65, (200, 200, 255), size=16)
             
+            # Handle click event
             if button_rect.collidepoint(pygame.mouse.get_pos()):
                 self.tooltip_text = data.get('description', '')
-                if pygame.mouse.get_pressed()[0]:
+                if pygame.mouse.get_pressed()[0] and can_afford:  # Only allow selection if can afford
                     self.selected_building_type = building_type
+                    # Force immediate update of zones
+                    self.world.update_building_zones()
             
             y += button_height + 5
 
     def _render_building_preview(self, screen):
         """Render building placement preview"""
+        if not self.selected_building_type:
+            return
+            
         mouse_pos = pygame.mouse.get_pos()
         world_pos = self.screen_to_world(mouse_pos)
         grid_x, grid_y = self.world.get_grid_position(world_pos[0], world_pos[1])
         self.hovering_grid_pos = (grid_x, grid_y)
         
         if 0 <= grid_x < self.world.current_size and 0 <= grid_y < self.world.current_size:
+            # Get exact grid-aligned position
             pixel_x, pixel_y = self.world.get_pixel_position(grid_x, grid_y)
+            
+            # Convert world coordinates to screen coordinates
+            screen_x = (pixel_x + self.camera_x) * self.zoom
+            screen_y = (pixel_y + self.camera_y) * self.zoom
+            
+            # Get building size and scale with zoom
+            building_size = BUILDING_TYPES[self.selected_building_type]['size'] 
+            total_size = building_size * TILE_SIZE * self.zoom
             
             # Check if placement is valid
             can_build, message = self.world.can_build(self.selected_building_type, pixel_x, pixel_y)
-            color = (100, 255, 100, 128) if can_build else (255, 100, 100, 128)
             
-            # Draw preview rectangle
-            preview_rect = pygame.Rect(
-                pixel_x - self.camera_x,
-                pixel_y - self.camera_y,
-                TILE_SIZE,
-                TILE_SIZE
-            )
-            pygame.draw.rect(screen, color, preview_rect)
+            # Create preview surface with proper size
+            highlight_surface = pygame.Surface((total_size, total_size))
+            highlight_surface.set_alpha(128)
             
-            self.tooltip_text = message
+            # Set color based on validity
+            if can_build:
+                color = (100, 255, 100)  # Green for valid
+                self.tooltip_text = f"Click to build {self.selected_building_type}"
+            else:
+                color = (255, 100, 100)  # Red for invalid
+                self.tooltip_text = message
+                
+            highlight_surface.fill(color)
+            screen.blit(highlight_surface, (screen_x, screen_y))
+            
+            # Draw grid lines
+            for i in range(building_size + 1):
+                # Vertical lines
+                line_x = screen_x + i * TILE_SIZE * self.zoom
+                pygame.draw.line(screen, (255, 255, 255),
+                               (line_x, screen_y),
+                               (line_x, screen_y + total_size))
+                # Horizontal lines
+                line_y = screen_y + i * TILE_SIZE * self.zoom
+                pygame.draw.line(screen, (255, 255, 255),
+                               (screen_x, line_y),
+                               (screen_x + total_size, line_y))
 
     def _render_alerts(self, screen):
-        """Render alerts in bottom-left corner with improved visibility"""
-        alert_y = screen.get_height() - (len(self.world.resource_alerts) * 25 + 10)
+        """Render alerts in bottom-left corner with improved visibility and spacing"""
+        alert_spacing = 30
+        alert_padding = 20
+        alert_y = screen.get_height() - (len(self.world.resource_alerts) * alert_spacing + alert_padding)
+        
         for alert in self.world.resource_alerts:
             # Create a semi-transparent background for better readability
             text_surface = self.font.render(alert, True, (255, 100, 100))
             background = pygame.Surface((text_surface.get_width() + 20, 24))
             background.set_alpha(128)
             background.fill((0, 0, 0))
-            screen.blit(background, (5, alert_y - 2))
-            self.draw_text(screen, alert, 10, alert_y, (255, 100, 100))
-            alert_y += 25
+            screen.blit(background, (10, alert_y - 2))
+            self.draw_text(screen, alert, 20, alert_y, (255, 100, 100))
+            alert_y += alert_spacing
 
     def _render_tooltip(self, screen):
         """Render tooltip with building suggestions"""
@@ -818,27 +854,51 @@ class UI:
             y += surface.get_height()
 
     def generate_building_suggestion(self):
-        """Generate building suggestions based on colony needs"""
+        """Generate building suggestions based on colony needs and zone scores"""
         suggestions = []
         stats = self.world.building_requirements
         
-        if stats['housing'] > 0:
-            suggestions.append(f"Need housing for {stats['housing']} colonists")
+        # Get the highest scoring zones for each building type
+        best_zones = {}
+        for scores in self.world.building_zones.values():
+            for building_type, score in scores.items():
+                if score > best_zones.get(building_type, 0):
+                    best_zones[building_type] = score
         
-        if stats['jobs'] > 0:
-            suggestions.append(f"Need jobs for {stats['jobs']} colonists")
+        # Add critical needs first
+        if stats.get('housing', 0) > 0:
+            house_score = best_zones.get('house', 0)
+            if house_score > 70:
+                suggestions.append(f"Good housing location available! Need housing for {stats['housing']} colonists")
+            else:
+                suggestions.append(f"Need housing for {stats['housing']} colonists")
         
-        for resource, data in stats['resources'].items():
-            if data['amount'] < 5:  # Low resource threshold
-                suggestions.append(f"Low on {resource}. Build more {resource} production.")
+        if stats.get('jobs', 0) > 0:
+            job_buildings = [b for b, s in best_zones.items() if s > 70 and b in ['farm', 'workshop', 'market']]
+            if job_buildings:
+                suggestions.append(f"Good location for {job_buildings[0]}! Need jobs for {stats['jobs']} colonists")
+            else:
+                suggestions.append(f"Need jobs for {stats['jobs']} colonists")
         
-        if stats['happiness'] < 70:
-            suggestions.append("Consider building amenities to increase happiness")
-            
-        return "\n".join(suggestions) if suggestions else "Colony is doing well!"
+        # Add resource suggestions
+        for resource, data in stats.get('resources', {}).items():
+            if data.get('amount', 100) < 20:  # Low resource threshold
+                if resource in best_zones and best_zones[resource] > 60:
+                    suggestions.append(f"Good location available for {resource} production!")
+        
+        return "\n".join(suggestions) if suggestions else "Colony is stable. Build where you like!"
 
-    def draw_text(self, screen, text, x, y, color=(255, 255, 255), size=24):
-        """Helper method to draw text on screen"""
+    def draw_text(self, screen, text, x, y, color=None, size=24):
+        """Enhanced text drawing with modern styling"""
+        if color is None:
+            color = COLORS['text']
         font = pygame.font.Font(None, size)
         text_surface = font.render(text, True, color)
         screen.blit(text_surface, (x, y))
+
+    def get_average_happiness(self):
+        """Calculate the average happiness of all colonists"""
+        if not self.world.colonists:
+            return 0.0
+        total_happiness = sum(colonist.happiness for colonist in self.world.colonists)
+        return total_happiness / len(self.world.colonists)

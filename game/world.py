@@ -88,6 +88,10 @@ class World:
             pygame.K_s: False
         }
         
+        # Add initial setup state tracking, but don't enforce a specific order
+        self.initial_setup_complete = False
+        self.buildings_needed = {'farm', 'woodcutter', 'quarry'}  # Set of required buildings
+        
         # Generate initial colony
         self.generate_initial_colony()
 
@@ -110,13 +114,13 @@ class World:
     def screen_to_world(self, pos):
         """Convert screen coordinates to world coordinates"""
         if self.ui:
-            # Remove camera offset and apply zoom
-            world_x = (pos[0] - self.ui.camera_x) / self.ui.zoom
-            world_y = (pos[1] - self.ui.camera_y) / self.ui.zoom
+            # First remove camera offset and apply zoom
+            screen_x = pos[0]
+            screen_y = pos[1]
             
-            # Remove world offset
-            world_x -= self.offset_x
-            world_y -= self.offset_y
+            # Convert screen position to world position
+            world_x = (screen_x - self.ui.camera_x) / self.ui.zoom
+            world_y = (screen_y - self.ui.camera_y) / self.ui.zoom
             
             return (world_x, world_y)
         return pos
@@ -138,13 +142,13 @@ class World:
         return (int(grid_x), int(grid_y))
 
     def get_pixel_position(self, x, y=None):
-        """Convert grid coordinates to world coordinates (center of tile)"""
+        """Convert grid coordinates to world coordinates (top-left of tile)"""
         if y is None and isinstance(x, (tuple, list)):
             x, y = x[0], x[1]
         
-        # Convert to pixel coordinates and center in tile
-        world_x = x * TILE_SIZE + TILE_SIZE // 2
-        world_y = y * TILE_SIZE + TILE_SIZE // 2
+        # Convert to pixel coordinates and align to tile top-left
+        world_x = x * TILE_SIZE
+        world_y = y * TILE_SIZE
         
         # Add world offset
         world_x += self.offset_x
@@ -231,7 +235,7 @@ class World:
         return True
 
     def generate_initial_colony(self):
-        """Generate initial colony with all essential resource buildings"""
+        """Generate initial colony with only the central government building"""
         # Calculate center of grid
         center_x = self.current_size // 2
         center_y = self.current_size // 2
@@ -243,71 +247,42 @@ class World:
         self.add_to_grid(gov_building, center_x, center_y)
         self.jobs.extend(gov_building.create_jobs())
         
-        # Create houses in a ring around center
-        house_offsets = [
-            (-2, -2), (0, -2), (2, -2),  # Top row
-            (-2, 0),           (2, 0),    # Middle row
-            (-2, 2),  (0, 2),  (2, 2)     # Bottom row
+        # Create initial colonists near government building
+        placement_positions = [
+            (0,1), (1,0), (0,-1), (-1,0),  # Adjacent positions
+            (1,1), (-1,1), (1,-1), (-1,-1), # Diagonal positions
+            (0,2), (2,0)  # Two extra positions to ensure 10 colonists
         ]
         
-        for offset_x, offset_y in house_offsets:
-            grid_x = center_x + offset_x
-            grid_y = center_y + offset_y
-            if 0 <= grid_x < self.current_size and 0 <= grid_y < self.current_size:
-                pos = self.get_pixel_position(grid_x, grid_y)
-                house = Building(building_type='house', x=pos[0], y=pos[1], world=self)
-                self.buildings.append(house)
-                self.homes.append(house)
-                self.add_to_grid(house, grid_x, grid_y)
-        
-        # Create essential resource buildings
-        resource_buildings = [
-            ('farm', 3, -3),       # Food production
-            ('woodcutter', -3, 3), # Wood production
-            ('quarry', 3, 3),      # Stone production
-            ('mine', -3, -3),      # Metal production
-            ('workshop', 0, 3),    # Goods production
-            ('market', 3, 0)       # Resource distribution
-        ]
-        
-        for building_type, offset_x, offset_y in resource_buildings:
-            grid_x = center_x + offset_x
-            grid_y = center_y + offset_y
-            if 0 <= grid_x < self.current_size and 0 <= grid_y < self.current_size:
-                pos = self.get_pixel_position(grid_x, grid_y)
-                building = Building(building_type=building_type, x=pos[0], y=pos[1], world=self)
-                self.buildings.append(building)
-                self.add_to_grid(building, grid_x, grid_y)
-                self.jobs.extend(building.create_jobs())
-        
-        # Create initial colonists near buildings
-        for _ in range(INITIAL_COLONISTS):
-            # Choose a random building to place colonist near
-            building = random.choice(self.buildings)
-            building_grid_x, building_grid_y = self.get_grid_position(building.x, building.y)
+        for dx, dy in placement_positions:
+            colonist_grid_x = center_x + dx
+            colonist_grid_y = center_y + dy
             
-            # Find empty adjacent tile
-            placed = False
-            for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
-                colonist_grid_x = building_grid_x + dx
-                colonist_grid_y = building_grid_y + dy
+            if (0 <= colonist_grid_x < self.current_size and 
+                0 <= colonist_grid_y < self.current_size):
                 
-                if (0 <= colonist_grid_x < self.current_size and 
-                    0 <= colonist_grid_y < self.current_size):
-                    
-                    if not self.is_grid_occupied(colonist_grid_x, colonist_grid_y):
-                        # Convert to pixel coordinates
-                        colonist_pos = self.get_pixel_position(colonist_grid_x, colonist_grid_y)
-                        colonist = Colonist(colonist_pos[0], colonist_pos[1], self)
-                        
-                        self.colonists.append(colonist)
-                        self.add_to_grid(colonist, colonist_grid_x, colonist_grid_y)
-                        placed = True
-                        break
-                        
-            # If no adjacent spot found, try again with another building
-            if not placed:
-                continue
+                if not self.is_grid_occupied(colonist_grid_x, colonist_grid_y):
+                    colonist_pos = self.get_pixel_position(colonist_grid_x, colonist_grid_y)
+                    colonist = Colonist(colonist_pos[0], colonist_pos[1], self)
+                    self.colonists.append(colonist)
+                    self.add_to_grid(colonist, colonist_grid_x, colonist_grid_y)
+
+    def handle_initial_building_placement(self, x, y):
+        """Handle building placement during setup phase"""
+        if self.initial_setup_complete:
+            return False, "Initial setup is already complete"
+        
+        return True, "Use the Build menu to place required buildings"
+
+    def get_initial_setup_status(self):
+        """Get current status of initial setup"""
+        if self.initial_setup_complete:
+            return "Setup complete"
+        
+        missing_buildings = self.buildings_needed - {b.building_type for b in self.buildings}
+        if missing_buildings:
+            return f"Still need: {', '.join(sorted(missing_buildings))}"
+        return "Ready to start"
 
     def render(self, screen):
         # Get camera offset
@@ -334,7 +309,7 @@ class World:
             screen_y = self.offset_y + y * TILE_SIZE + camera_y
             pygame.draw.line(screen, grid_color,
                            (self.offset_x + camera_x, screen_y),
-                           (self.offset_x + self.width + camera_x, screen_y))
+                           (self.offset_x + self.width + camera_y, screen_y))
         
         # Draw building zones if in building mode
         if self.ui and self.ui.show_building_menu:
@@ -922,18 +897,31 @@ class World:
             
         return True, "Can build here"
 
-    def build_structure(self, building_type, x, y):
-        """Place a new building (called by UI/player)"""
-        can_build, message = self.can_build(building_type, x, y)
+    def build_structure(self, building_type, click_x, click_y):
+        """Place a new building at the exact clicked position"""
+        # Convert click position to world coordinates
+        world_x, world_y = click_x, click_y
+        if self.ui:
+            world_x = (click_x - self.ui.camera_x) / self.ui.zoom
+            world_y = (click_y - self.ui.camera_y) / self.ui.zoom
+        
+        # Get grid position (accounting for offset)
+        grid_x = int((world_x - self.offset_x) / TILE_SIZE)
+        grid_y = int((world_y - self.offset_y) / TILE_SIZE)
+        
+        # Calculate exact snapped coordinates
+        snapped_x = grid_x * TILE_SIZE + self.offset_x
+        snapped_y = grid_y * TILE_SIZE + self.offset_y
+        
+        can_build, message = self.can_build(building_type, snapped_x, snapped_y)
         if not can_build:
             return False, message
             
-        # Create building
-        building = Building(building_type=building_type, x=x, y=y, world=self)
+        # Create building with snapped coordinates
+        building = Building(building_type=building_type, x=snapped_x, y=snapped_y, world=self)
         self.buildings.append(building)
         
         # Update grid occupation
-        grid_x, grid_y = self.get_grid_position(x, y)
         building_size = BUILDING_TYPES[building_type]['size']
         for dx in range(building_size):
             for dy in range(building_size):
@@ -950,10 +938,16 @@ class World:
         elif building_type in ['shop', 'factory', 'farm', 'bank', 'government']:
             self.jobs.extend(building.create_jobs())
         
-        # Update building zones after placement
-        self.update_building_zones()
+        # Check if this completes the initial setup
+        if not self.initial_setup_complete:
+            self.buildings_needed.discard(building_type)  # Remove this building type from needed set
+            if not self.buildings_needed:  # If no more buildings needed
+                self.initial_setup_complete = True
+                if self.ui:
+                    self.ui.show_setup_instructions = False  # Hide setup UI
+                return True, f"{building_type.title()} placed - Initial setup complete!"
         
-        return True, "Building placed successfully"
+        return True, f"{building_type.title()} placed successfully"
 
     def update_colony_needs(self):
         """Enhanced colony needs tracking with improved resource management"""

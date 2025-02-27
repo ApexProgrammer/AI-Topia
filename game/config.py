@@ -6,7 +6,7 @@ TITLE = "AI Colony Simulation"
 
 # Grid Configuration
 TILE_SIZE = 32
-INITIAL_MAP_SIZE = 20
+INITIAL_MAP_SIZE = 15  # Reduced for smaller starting area
 EXPANSION_BUFFER = 2
 MIN_MAP_SIZE = 20
 MAX_MAP_SIZE = 50
@@ -34,6 +34,7 @@ HAPPINESS_RADIUS = 200  # Radius for building happiness effects
 WORK_RADIUS = 50      # Radius for work efficiency bonus
 BASE_RESOURCE_COST = 10
 INVENTORY_UPDATE_RATE = 60
+INITIAL_COLONISTS = 10  # Reduced from 200 to 10
 
 # Camera Configuration
 CAMERA_ZOOM_SPEED = 0.1
@@ -44,7 +45,6 @@ RETIREMENT_AGE = 70
 LIFE_EXPECTANCY = 90
 REPRODUCTION_AGE_MIN = 20
 REPRODUCTION_AGE_MAX = 60
-INITIAL_COLONISTS = 200
 REPRODUCTION_BASE_CHANCE = 0.2
 REPRODUCTION_COOLDOWN = 10
 MARRIAGE_CHANCE = 0.2
@@ -187,11 +187,11 @@ BUILDING_TYPES = {
 
 # Initial Resource Configuration
 INITIAL_RESOURCES = {
-    'food': 200,
-    'wood': 150,
-    'stone': 100,
-    'metal': 50,
-    'goods': 50
+    'food': 100,  # Reduced initial resources
+    'wood': 75,
+    'stone': 50,
+    'metal': 25,
+    'goods': 25
 }
 
 # Resource Generation

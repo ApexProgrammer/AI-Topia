@@ -77,6 +77,18 @@ class World:
         self.building_requirements = {}
         self.building_zones = {}
         
+        # Add key state tracking
+        self.keys_pressed = {
+            pygame.K_LEFT: False,
+            pygame.K_RIGHT: False,
+            pygame.K_UP: False,
+            pygame.K_DOWN: False,
+            pygame.K_a: False,
+            pygame.K_d: False,
+            pygame.K_w: False,
+            pygame.K_s: False
+        }
+        
         # Generate initial colony
         self.generate_initial_colony()
 
@@ -455,6 +467,19 @@ class World:
         # New: Update building zones for suggestions
         self.update_building_zones()
 
+        # Update score
+        self.calculate_score()
+
+        # Update camera position based on both WASD and arrow keys
+        if self.keys_pressed[pygame.K_LEFT] or self.keys_pressed[pygame.K_a]:
+            self.camera_x += self.camera_acceleration
+        if self.keys_pressed[pygame.K_RIGHT] or self.keys_pressed[pygame.K_d]:
+            self.camera_x -= self.camera_acceleration
+        if self.keys_pressed[pygame.K_UP] or self.keys_pressed[pygame.K_w]:
+            self.camera_y += self.camera_acceleration
+        if self.keys_pressed[pygame.K_DOWN] or self.keys_pressed[pygame.K_s]:
+            self.camera_y -= self.camera_acceleration
+
     def update_economy(self):
         """Update the colony's economy"""
         current_time = pygame.time.get_ticks()
@@ -705,6 +730,13 @@ class World:
 
     def handle_event(self, event):
         """Handle pygame events"""
+        if event.type == pygame.KEYDOWN:
+            if event.key in self.keys_pressed:
+                self.keys_pressed[event.key] = True
+        elif event.type == pygame.KEYUP:
+            if event.key in self.keys_pressed:
+                self.keys_pressed[event.key] = False
+        
         if event.type == pygame.MOUSEBUTTONDOWN:
             # Handle colonist selection for information display
             mouse_pos = pygame.mouse.get_pos()
@@ -1196,3 +1228,10 @@ class World:
                             return False
         
         return True
+
+    def calculate_score(self):
+        """Calculate current score based on population and treasury"""
+        population_score = len(self.colonists) * 100  # 100 points per colonist
+        money_score = int(self.treasury / 100)  # 1 point per 100 money
+        self.score = population_score + money_score
+        return self.score

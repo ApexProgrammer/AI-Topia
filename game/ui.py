@@ -404,6 +404,24 @@ class UI:
         if self.tooltip_text:
             self._render_tooltip(self.screen)
 
+        # Draw score in top right corner
+        score_text = f"Score: {self.world.score:,}"
+        score_surface = self.font.render(score_text, True, COLORS['text_header'])
+        score_x = self.screen.get_width() - score_surface.get_width() - 20
+        score_y = 20
+        
+        # Draw background for score
+        padding = 10
+        score_bg = pygame.Rect(
+            score_x - padding,
+            score_y - padding,
+            score_surface.get_width() + padding * 2,
+            score_surface.get_height() + padding * 2
+        )
+        pygame.draw.rect(self.screen, COLORS['panel'], score_bg)
+        pygame.draw.rect(self.screen, COLORS['border'], score_bg, 1)
+        self.screen.blit(score_surface, (score_x, score_y))
+
     def _draw_panel(self, x, y, width, height, title=None):
         """Draw a modern styled panel with optional title"""
         # Panel background

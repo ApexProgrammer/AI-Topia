@@ -40,14 +40,9 @@ class Colonist:
             'money': self.money
         }
         
-        # Leadership and skills
+        # Leadership and skills - removed construction_skill
         self.leadership = random.randint(0, 100)
-        self.construction_skill = random.randint(0, 100)
         self.business_skill = random.randint(0, 100)
-        
-        # Building projects
-        self.current_project = None
-        self.project_progress = 0
         
         # Personality traits
         self.traits = {
@@ -64,7 +59,7 @@ class Colonist:
         self.home = None
         self.spouse = None
         self.children = []
-        self.role = None  # leader, builder, worker, etc.
+        self.role = None  # leader, worker, etc.
         
         # AI state
         self.current_task = None

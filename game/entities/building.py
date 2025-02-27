@@ -240,18 +240,14 @@ class Building:
 
     def render(self, screen, camera_x=0, camera_y=0, zoom=1.0):
         """Render building with improved visual feedback"""
-        # Calculate screen position with correct offset
+        # Calculate screen position with camera offset and zoom
         screen_x = int((self.x + camera_x) * zoom)
         screen_y = int((self.y + camera_y) * zoom)
         
         # Calculate size based on building configuration and zoom
         size = int(self.size * TILE_SIZE * zoom)
         
-        # Center the building on its grid position
-        screen_x -= size // 2
-        screen_y -= size // 2
-        
-        # Draw building base
+        # Draw building base - no centering adjustment needed since position is already grid-aligned
         building_rect = pygame.Rect(screen_x, screen_y, size, size)
         color = self.colors.get(self.building_type, (200, 200, 200))
         if not self.is_complete:
@@ -259,7 +255,7 @@ class Building:
             progress = self.construction_progress / self.build_time
             color = tuple(int(c * (0.5 + 0.5 * progress)) for c in color)
         
-        # Draw with proper grid alignment
+        # Draw building
         pygame.draw.rect(screen, color, building_rect)
         
         # Draw grid lines for multi-tile buildings

@@ -148,6 +148,13 @@ class UI:
         self.update_timer = 0
         self.UPDATE_INTERVAL = 30  # Update suggestions every 30 frames
 
+        self.show_setup_instructions = True
+        
+        # Message display state
+        self.message = None
+        self.message_timer = 0
+        self.MESSAGE_DURATION = 120  # Show messages for 2 seconds (60 fps * 2)
+
     def handle_event(self, event):
         """Main event handler for all UI interactions"""
         if event.type == pygame.KEYDOWN:
@@ -244,6 +251,13 @@ class UI:
                 self.selected_building_type = None
                 self.tooltip_text = None
 
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:  # Left click
+            # Show setup instructions until initial buildings are complete
+            if not self.world.initial_setup_complete:
+                if not self.show_building_menu:
+                    self.show_message("Open the Build menu to place required buildings")
+                    self.show_setup_instructions = True
+
     def handle_policy_click(self, mouse_pos):
         """Enhanced policy interaction handling"""
         menu_x = self.screen.get_width() - 310
@@ -333,6 +347,12 @@ class UI:
         self.buttons['laws'].active = self.law_menu_open
         self.buttons['build'].active = self.show_building_menu
 
+        # Update message timer
+        if self.message and self.message_timer > 0:
+            self.message_timer -= 1
+            if self.message_timer <= 0:
+                self.message = None
+
     def screen_to_world(self, pos):
         """Convert screen coordinates to world coordinates"""
         return ((pos[0] - self.camera_x) / self.zoom,
@@ -421,6 +441,95 @@ class UI:
         pygame.draw.rect(self.screen, COLORS['panel'], score_bg)
         pygame.draw.rect(self.screen, COLORS['border'], score_bg, 1)
         self.screen.blit(score_surface, (score_x, score_y))
+
+        # Show initial setup instructions and preview
+        if not self.world.initial_setup_complete and self.show_setup_instructions:
+            # Calculate position to show setup info on the right side
+            setup_panel_width = 300
+            
+            # Adjust x position when build menu is open to avoid overlap
+            if self.show_building_menu:
+                setup_panel_x = self.screen.get_width() - setup_panel_width - 270  # Move left of build menu
+            else:
+                setup_panel_x = self.screen.get_width() - setup_panel_width - 10
+                
+            setup_panel_y = score_y + score_bg.height + 20  # Position below score display
+            
+            setup_status = self.world.get_initial_setup_status()
+            
+            # Create instruction list without status
+            instructions = [
+                "Initial Setup Required",
+                "---------------",
+                "Use the Build menu to place:",
+                "- Farm (For food production)",
+                "- Woodcutter (For wood production)",
+                "- Quarry (For stone production)",
+                ""
+            ]
+            
+            # Wrap status text to fit panel width
+            status_lines = []
+            words = setup_status.split()
+            current_line = "Status: "
+            for word in words:
+                test_line = current_line + word + " "
+                if self.font.size(test_line)[0] < setup_panel_width - 40:  # Leave margin
+                    current_line = test_line
+                else:
+                    status_lines.append(current_line)
+                    current_line = "        " + word + " "  # Indent continuation lines
+            status_lines.append(current_line)  # Add final line
+            
+            # Add wrapped status lines to instructions
+            instructions.extend(status_lines)
+            
+            # Calculate panel height based on text
+            line_height = 25
+            panel_height = (len(instructions) + 1) * line_height + 20
+            
+            # Draw semi-transparent panel background
+            s = pygame.Surface((setup_panel_width, panel_height))
+            s.set_alpha(180)  # More transparent
+            s.fill(COLORS['panel'])
+            self.screen.blit(s, (setup_panel_x, setup_panel_y))
+            pygame.draw.rect(self.screen, COLORS['border'], (setup_panel_x, setup_panel_y, setup_panel_width, panel_height), 1)
+            
+            # Draw panel title with higher opacity
+            title = self.font.render("Colony Setup", True, COLORS['text_header'])
+            self.screen.blit(title, (setup_panel_x + 10, setup_panel_y + 5))
+            
+            # Draw instructions
+            y = setup_panel_y + 30
+            for line in instructions:
+                color = COLORS['text_header'] if line.startswith('Status:') else COLORS['text']
+                self.draw_text(self.screen, line, setup_panel_x + 10, y, color)
+                y += line_height
+
+        # Draw message if active
+        if self.message and self.message_timer > 0:
+            # Create message surface with padding
+            padding = 10
+            message_surface = self.font.render(self.message, True, COLORS['text'])
+            bg_rect = pygame.Rect(
+                (self.screen.get_width() - message_surface.get_width()) // 2 - padding,
+                100 - padding,  # Position near top of screen
+                message_surface.get_width() + padding * 2,
+                message_surface.get_height() + padding * 2
+            )
+            
+            # Draw semi-transparent background
+            s = pygame.Surface((bg_rect.width, bg_rect.height))
+            s.set_alpha(230)
+            s.fill(COLORS['panel'])
+            self.screen.blit(s, bg_rect)
+            pygame.draw.rect(self.screen, COLORS['border'], bg_rect, 1)
+            
+            # Draw message text
+            self.screen.blit(message_surface, (
+                (self.screen.get_width() - message_surface.get_width()) // 2,
+                100
+            ))
 
     def _draw_panel(self, x, y, width, height, title=None):
         """Draw a modern styled panel with optional title"""
@@ -781,13 +890,13 @@ class UI:
             # Get exact grid-aligned position
             pixel_x, pixel_y = self.world.get_pixel_position(grid_x, grid_y)
             
-            # Convert world coordinates to screen coordinates
-            screen_x = (pixel_x + self.camera_x) * self.zoom
-            screen_y = (pixel_y + self.camera_y) * self.zoom
+            # Convert world coordinates to screen coordinates with zoom
+            screen_x = int((pixel_x + self.camera_x) * self.zoom)
+            screen_y = int((pixel_y + self.camera_y) * self.zoom)
             
             # Get building size and scale with zoom
-            building_size = BUILDING_TYPES[self.selected_building_type]['size'] 
-            total_size = building_size * TILE_SIZE * self.zoom
+            building_size = BUILDING_TYPES[self.selected_building_type]['size']
+            total_size = int(building_size * TILE_SIZE * self.zoom)
             
             # Check if placement is valid
             can_build, message = self.world.can_build(self.selected_building_type, pixel_x, pixel_y)
@@ -807,15 +916,15 @@ class UI:
             highlight_surface.fill(color)
             screen.blit(highlight_surface, (screen_x, screen_y))
             
-            # Draw grid lines
+            # Draw grid lines to show tiles
             for i in range(building_size + 1):
                 # Vertical lines
-                line_x = screen_x + i * TILE_SIZE * self.zoom
+                line_x = screen_x + i * int(TILE_SIZE * self.zoom)
                 pygame.draw.line(screen, (255, 255, 255),
                                (line_x, screen_y),
                                (line_x, screen_y + total_size))
                 # Horizontal lines
-                line_y = screen_y + i * TILE_SIZE * self.zoom
+                line_y = screen_y + i * int(TILE_SIZE * self.zoom)
                 pygame.draw.line(screen, (255, 255, 255),
                                (screen_x, line_y),
                                (screen_x + total_size, line_y))
@@ -932,3 +1041,8 @@ class UI:
             return 0.0
         total_happiness = sum(colonist.happiness for colonist in self.world.colonists)
         return total_happiness / len(self.world.colonists)
+
+    def show_message(self, msg):
+        """Display a message to the user"""
+        self.message = msg
+        self.message_timer = self.MESSAGE_DURATION

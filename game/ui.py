@@ -148,6 +148,9 @@ class UI:
         self.update_timer = 0
         self.UPDATE_INTERVAL = 30  # Update suggestions every 30 frames
 
+        self.selected_building = None  # Add this line
+        self.show_building_info = False  # Add this line
+
     def handle_event(self, event):
         """Main event handler for all UI interactions"""
         if event.type == pygame.KEYDOWN:
@@ -205,20 +208,39 @@ class UI:
             elif self.law_menu_open:
                 self.handle_law_click(mouse_pos)
             
+            # Handle building info on right click only
+            if event.button == 3:  # Right click
+                mouse_pos = pygame.mouse.get_pos()
+                world_pos = self.screen_to_world(mouse_pos)
+                
+                # Check for building clicks
+                for building in self.world.buildings:
+                    building_rect = pygame.Rect(
+                        (building.x + self.camera_x) * self.zoom - (building.base_size * self.zoom) / 2,
+                        (building.y + self.camera_y) * self.zoom - (building.base_size * self.zoom) / 2,
+                        building.base_size * self.zoom,
+                        building.base_size * self.zoom
+                    )
+                    if building_rect.collidepoint(mouse_pos):
+                        self.selected_building = building
+                        self.show_building_info = True
+                        return
+                
+                # If clicked empty space, clear building selection
+                self.selected_building = None
+                self.show_building_info = False
+
             # Handle building placement
-            elif self.show_building_menu:
-                if event.button == 1:  # Left click
-                    if self.selected_building_type and self.hovering_grid_pos:
-                        x, y = self.world.get_pixel_position(*self.hovering_grid_pos)
-                        success, message = self.world.build_structure(self.selected_building_type, x, y)
-                        if success:
-                            self.world.update_building_zones()
-                            self.world.update_colony_needs()
-                            self.tooltip_text = self.generate_building_suggestion()
-                        else:
-                            self.tooltip_text = message
-                elif event.button == 3:  # Right click
-                    self.selected_building_type = None
+            elif self.show_building_menu and event.button == 1:  # Left click
+                if self.selected_building_type and self.hovering_grid_pos:
+                    x, y = self.world.get_pixel_position(*self.hovering_grid_pos)
+                    success, message = self.world.build_structure(self.selected_building_type, x, y)
+                    if success:
+                        self.world.update_building_zones()
+                        self.world.update_colony_needs()
+                        self.tooltip_text = self.generate_building_suggestion()
+                    else:
+                        self.tooltip_text = message
 
         elif event.type == pygame.MOUSEMOTION:
             # Update button hover states
@@ -421,6 +443,10 @@ class UI:
         pygame.draw.rect(self.screen, COLORS['panel'], score_bg)
         pygame.draw.rect(self.screen, COLORS['border'], score_bg, 1)
         self.screen.blit(score_surface, (score_x, score_y))
+
+        # Draw building info if selected
+        if self.show_building_info and self.selected_building:
+            self._render_building_info(self.screen)
 
     def _draw_panel(self, x, y, width, height, title=None):
         """Draw a modern styled panel with optional title"""
@@ -932,3 +958,50 @@ class UI:
             return 0.0
         total_happiness = sum(colonist.happiness for colonist in self.world.colonists)
         return total_happiness / len(self.world.colonists)
+
+    def _render_building_info(self, screen):
+        """Render detailed building information panel"""
+        building = self.selected_building
+        info_width = 300
+        padding = 10
+        line_height = 25
+        
+        # Prepare info lines
+        info_lines = [
+            f"Type: {building.building_type.title()}",
+            f"Status: {'Complete' if building.is_complete else f'Building ({int(building.construction_progress/building.build_time*100)}%)'}",
+        ]
+        
+        # Add specialized info based on building type
+        if building.building_type == 'house':
+            info_lines.extend([
+                f"Occupants: {building.current_occupants}/{building.capacity}",
+                f"Happiness Bonus: +{building.happiness_bonus}"
+            ])
+        elif hasattr(building, 'jobs'):
+            filled_jobs = len([j for j in building.jobs if j.employee])
+            info_lines.extend([
+                f"Workers: {filled_jobs}/{building.max_jobs}",
+                f"Efficiency: {int(filled_jobs/building.max_jobs*100 if building.max_jobs else 0)}%"
+            ])
+        
+        if building.produces:
+            info_lines.extend([
+                f"Produces: {building.produces.title()}",
+                f"Production Rate: {building.production_rate:.1f}/day"
+            ])
+        
+        # Calculate panel dimensions
+        panel_height = len(info_lines) * line_height + padding * 2
+        
+        # Position panel near mouse but ensure it stays on screen
+        mouse_pos = pygame.mouse.get_pos()
+        panel_x = min(screen.get_width() - info_width - padding, mouse_pos[0])
+        panel_y = min(screen.get_height() - panel_height - padding, mouse_pos[1])
+        
+        # Draw panel background
+        self._draw_panel(panel_x, panel_y, info_width, panel_height, f"{building.building_type.title()} Info")
+        
+        # Draw info lines
+        for i, line in enumerate(info_lines):
+            self.draw_text(screen, line, panel_x + padding, panel_y + padding + i * line_height, COLORS['text'])

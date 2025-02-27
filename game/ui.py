@@ -132,7 +132,11 @@ class UI:
             pygame.K_LEFT: False,
             pygame.K_RIGHT: False,
             pygame.K_UP: False,
-            pygame.K_DOWN: False
+            pygame.K_DOWN: False,
+            pygame.K_a: False,  # Added A
+            pygame.K_d: False,  # Added D
+            pygame.K_w: False,  # Added W
+            pygame.K_s: False   # Added S
         }
         
         # Building menu and placement
@@ -285,14 +289,14 @@ class UI:
             y += 30
 
     def update(self):
-        # Update camera position based on key states
-        if self.keys_pressed[pygame.K_LEFT]:
+        # Update camera position based on both WASD and arrow keys
+        if self.keys_pressed[pygame.K_LEFT] or self.keys_pressed[pygame.K_a]:
             self.camera_velocity_x += self.camera_acceleration
-        if self.keys_pressed[pygame.K_RIGHT]:
+        if self.keys_pressed[pygame.K_RIGHT] or self.keys_pressed[pygame.K_d]:
             self.camera_velocity_x -= self.camera_acceleration
-        if self.keys_pressed[pygame.K_UP]:
+        if self.keys_pressed[pygame.K_UP] or self.keys_pressed[pygame.K_w]:
             self.camera_velocity_y += self.camera_acceleration
-        if self.keys_pressed[pygame.K_DOWN]:
+        if self.keys_pressed[pygame.K_DOWN] or self.keys_pressed[pygame.K_s]:
             self.camera_velocity_y -= self.camera_acceleration
         
         # Apply friction

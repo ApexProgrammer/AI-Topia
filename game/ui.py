@@ -164,54 +164,27 @@ class UI:
         elif event.type == pygame.MOUSEBUTTONDOWN:
             mouse_pos = pygame.mouse.get_pos()
             
-            # Handle button clicks
-            for button_type, button in self.buttons.items():
-                if button.rect.collidepoint(mouse_pos):
-                    if button_type == 'policies':
-                        self.policy_menu_open = not self.policy_menu_open
-                        self.law_menu_open = False
-                        self.show_election_info = False
-                        self.show_building_menu = False
-                    elif button_type == 'election':
-                        self.show_election_info = not self.show_election_info
-                        self.policy_menu_open = False
-                        self.law_menu_open = False
-                        self.show_building_menu = False
-                    elif button_type == 'taxes':
-                        self.policy_menu_open = True
-                        self.law_menu_open = False
-                        self.show_election_info = False
-                        self.show_building_menu = False
-                    elif button_type == 'laws':
-                        self.law_menu_open = not self.law_menu_open
-                        self.policy_menu_open = False
-                        self.show_election_info = False
-                        self.show_building_menu = False
-                    elif button_type == 'scenario':
-                        if not self.world.scenario_manager.active_scenario:
-                            self.world.scenario_manager.trigger_scenario()
-                    elif button_type == 'build':
-                        self.show_building_menu = not self.show_building_menu
-                        if not self.show_building_menu:
-                            self.selected_building_type = None
-                            self.tooltip_text = None
-                        else:
-                            self.world.update_building_zones()
-                            self.selected_building_type = None
-                    return
+            # Handle button clicks first
+            if self.handle_button_clicks(mouse_pos):
+                return
 
-            # Handle policy menu clicks
-            if self.policy_menu_open:
-                self.handle_policy_click(mouse_pos)
-            
-            # Handle law menu clicks
-            elif self.law_menu_open:
-                self.handle_law_click(mouse_pos)
+            # Handle building placement with left click only
+            if self.show_building_menu and event.button == 1:  # Left click
+                if self.selected_building_type and self.hovering_grid_pos:
+                    x, y = self.world.get_pixel_position(*self.hovering_grid_pos)
+                    success, message = self.world.build_structure(self.selected_building_type, x, y)
+                    if success:
+                        self.world.update_building_zones()
+                        self.world.update_colony_needs()
+                        self.tooltip_text = self.generate_building_suggestion()
+                    else:
+                        self.tooltip_text = message
             
             # Handle building info on right click only
-            if event.button == 3:  # Right click
-                mouse_pos = pygame.mouse.get_pos()
-                world_pos = self.screen_to_world(mouse_pos)
+            elif event.button == 3:  # Right click
+                # Clear any previous selection first
+                self.selected_building = None
+                self.show_building_info = False
                 
                 # Check for building clicks
                 for building in self.world.buildings:
@@ -224,23 +197,7 @@ class UI:
                     if building_rect.collidepoint(mouse_pos):
                         self.selected_building = building
                         self.show_building_info = True
-                        return
-                
-                # If clicked empty space, clear building selection
-                self.selected_building = None
-                self.show_building_info = False
-
-            # Handle building placement
-            elif self.show_building_menu and event.button == 1:  # Left click
-                if self.selected_building_type and self.hovering_grid_pos:
-                    x, y = self.world.get_pixel_position(*self.hovering_grid_pos)
-                    success, message = self.world.build_structure(self.selected_building_type, x, y)
-                    if success:
-                        self.world.update_building_zones()
-                        self.world.update_colony_needs()
-                        self.tooltip_text = self.generate_building_suggestion()
-                    else:
-                        self.tooltip_text = message
+                        break
 
         elif event.type == pygame.MOUSEMOTION:
             # Update button hover states
@@ -265,6 +222,43 @@ class UI:
                 self.show_election_info = False
                 self.selected_building_type = None
                 self.tooltip_text = None
+
+    def handle_button_clicks(self, mouse_pos):
+        """Handle UI button clicks and return True if a button was clicked"""
+        for button_type, button in self.buttons.items():
+            if button.rect.collidepoint(mouse_pos):
+                if button_type == 'policies':
+                    self.policy_menu_open = not self.policy_menu_open
+                    self.law_menu_open = False
+                    self.show_election_info = False
+                    self.show_building_menu = False
+                elif button_type == 'election':
+                    self.show_election_info = not self.show_election_info
+                    self.policy_menu_open = False
+                    self.law_menu_open = False
+                    self.show_building_menu = False
+                elif button_type == 'taxes':
+                    self.policy_menu_open = True
+                    self.law_menu_open = False
+                    self.show_election_info = False
+                    self.show_building_menu = False
+                elif button_type == 'laws':
+                    self.law_menu_open = not self.law_menu_open
+                    self.policy_menu_open = False
+                    self.show_election_info = False
+                    self.show_building_menu = False
+                elif button_type == 'scenario':
+                    if not self.world.scenario_manager.active_scenario:
+                        self.world.scenario_manager.trigger_scenario()
+                elif button_type == 'build':
+                    self.show_building_menu = not self.show_building_menu
+                    if not self.show_building_menu:
+                        self.selected_building_type = None
+                        self.tooltip_text = None
+                    else:
+                        self.world.update_building_zones()
+                return True
+        return False
 
     def handle_policy_click(self, mouse_pos):
         """Enhanced policy interaction handling"""

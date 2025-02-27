@@ -3,15 +3,14 @@ import random
 import math
 from .entities.colonist import Colonist
 from .entities.building import Building
-from . import config
 from .config import (TILE_SIZE, INITIAL_MAP_SIZE, EXPANSION_BUFFER, MIN_MAP_SIZE,
                     MAX_MAP_SIZE, EXPANSION_COST, BUILDING_TYPES,
                     REPRODUCTION_AGE_MIN, REPRODUCTION_AGE_MAX,
                     COLONISTS_PER_TILE, BUILDINGS_PER_TILE,
                     MIN_BUILDING_SPACING, BUILDING_MARGIN,
-                    CONSTRUCTION_SKILL_THRESHOLD, MIN_MONEY_FOR_BUILDING, 
-                    BUILDING_CHANCE, TAX_RATE, INTEREST_RATE,
-                    INITIAL_TREASURY, WORKING_AGE, RETIREMENT_AGE)
+                    TAX_RATE, INTEREST_RATE, INITIAL_TREASURY, 
+                    WORKING_AGE, RETIREMENT_AGE, INITIAL_COLONISTS,
+                    INITIAL_RESOURCES)
 from .scenario import ScenarioManager
 
 class World:
@@ -25,7 +24,7 @@ class World:
         self.screen_height = screen_height
         
         # Automatically update grid size based on number of colonists
-        self.current_size = max(INITIAL_MAP_SIZE, math.ceil(math.sqrt(config.INITIAL_COLONISTS)) * 2)
+        self.current_size = max(INITIAL_MAP_SIZE, math.ceil(math.sqrt(INITIAL_COLONISTS)) * 2)
         self.width = self.current_size * TILE_SIZE
         self.height = self.current_size * TILE_SIZE
         
@@ -67,11 +66,11 @@ class World:
         
         # Resource tracking
         self.colony_inventory = {
-            'food': config.INITIAL_RESOURCES['food'],
-            'wood': config.INITIAL_RESOURCES['wood'],
-            'stone': config.INITIAL_RESOURCES['stone'],
-            'metal': config.INITIAL_RESOURCES['metal'],
-            'goods': config.INITIAL_RESOURCES['goods']
+            'food': INITIAL_RESOURCES['food'],
+            'wood': INITIAL_RESOURCES['wood'],
+            'stone': INITIAL_RESOURCES['stone'],
+            'metal': INITIAL_RESOURCES['metal'],
+            'goods': INITIAL_RESOURCES['goods']
         }
         self.resource_alerts = []
         self.building_requirements = {}
@@ -282,7 +281,7 @@ class World:
                 self.jobs.extend(building.create_jobs())
         
         # Create initial colonists near buildings
-        for _ in range(config.INITIAL_COLONISTS):
+        for _ in range(INITIAL_COLONISTS):
             # Choose a random building to place colonist near
             building = random.choice(self.buildings)
             building_grid_x, building_grid_y = self.get_grid_position(building.x, building.y)
@@ -452,19 +451,14 @@ class World:
         self.handle_reproduction()
         self.handle_deaths()
         
-        # New: Repeatedly check and perform map expansion if needed
+        # Check and perform map expansion if needed
         while self.check_expansion_needed():
             self.expand_map()
-        
-        # New: Let colonists attempt autonomous building if they have enough funds
-        for colonist in self.colonists:
-            if colonist.money >= MIN_MONEY_FOR_BUILDING and not colonist.current_task:
-                self.consider_autonomous_building(colonist)
 
-        # New: Update scenario manager for ethical challenge events
+        # Update scenario manager for ethical challenge events
         self.scenario_manager.update()
 
-        # New: Update building zones for suggestions
+        # Update building zones for suggestions
         self.update_building_zones()
 
         # Update score
@@ -881,73 +875,8 @@ class World:
         self.leader.happiness += 20
 
     def consider_autonomous_building(self, colonist):
-        """Colonist decides what to build based on colony needs"""
-        # Check if colonist meets building requirements
-        if (colonist.construction_skill < CONSTRUCTION_SKILL_THRESHOLD or
-            colonist.money < MIN_MONEY_FOR_BUILDING or
-            random.random() > BUILDING_CHANCE):
-            return
-            
-        # Analyze colony needs
-        housing_ratio = len([c for c in self.colonists if not c.home]) / max(1, len(self.colonists))
-        job_ratio = len([c for c in self.colonists if not c.job]) / max(1, len(self.colonists))
-        
-        # Calculate food per colonist
-        total_food = sum(c.inventory.get('food', 0) for c in self.colonists)
-        food_per_colonist = total_food / max(1, len(self.colonists))
-        
-        # Calculate priorities based on needs
-        priorities = []
-        
-        # Critical needs (high priority)
-        if housing_ratio > 0.2:  # More than 20% homeless
-            priorities.append(('house', 5 * (1 + housing_ratio)))
-        if food_per_colonist < 5:  # Less than 5 food per colonist
-            priorities.append(('farm', 4 * (1 + (5 - food_per_colonist)/5)))
-        if job_ratio > 0.3:  # More than 30% unemployed
-            priorities.append(('market', 3 * (1 + job_ratio)))
-            priorities.append(('farm', 3 * (1 + job_ratio)))
-        
-        # Development needs (medium priority)
-        if len(self.buildings) > 5:
-            bank_count = len([b for b in self.buildings if b.building_type == 'bank'])
-            if bank_count < len(self.colonists) / 20:  # 1 bank per 20 colonists
-                priorities.append(('bank', 2))
-        
-        # Government needs (lower priority)
-        if len(self.colonists) > 20:
-            gov_count = len([b for b in self.buildings if b.building_type == 'government'])
-            if gov_count < len(self.colonists) / 30:  # 1 government per 30 colonists
-                priorities.append(('government', 1))
-        
-        if priorities:
-            # Choose building type based on weighted priorities
-            building_type, priority = max(priorities, key=lambda x: x[1] * (0.8 + random.random() * 0.4))
-            
-            # Check if we have enough resources for the building
-            building_costs = BUILDING_TYPES[building_type]['cost']
-            can_afford = True
-            for resource, amount in building_costs.items():
-                if self.colony_inventory.get(resource, 0) < amount:
-                    can_afford = False
-                    break
-            
-            if can_afford:
-                # Find suitable location
-                location = self.find_building_location(building_type)
-                if location:
-                    grid_x, grid_y = location
-                    pos = self.get_pixel_position(grid_x, grid_y)
-                    
-                    # Try to create building
-                    if self.create_building(building_type, pos[0], pos[1]):
-                        # Deduct resources
-                        for resource, amount in building_costs.items():
-                            self.colony_inventory[resource] -= amount
-                        
-                        colonist.happiness += 10  # Happiness boost for successful building
-                        colonist.current_task = 'building'
-                        colonist.target_position = pos
+        """Colonists can no longer build autonomously"""
+        return False  # Disabled autonomous building
 
     def add_to_colony_inventory(self, resource_type, amount):
         """Add resources to the shared colony inventory"""

@@ -28,12 +28,23 @@ GOODS_PRODUCTION_RATE = 0.2
 COLONIST_SPEED = 0.2  # Increased from 0.008 for faster movement
 MOVEMENT_SPEED = 0.2  # Increased from 0.008 for faster movement
 DIAGONAL_MOVEMENT = True  # Enable diagonal movement for smoother paths
+
+# Game Balance
+HAPPINESS_RADIUS = 200  # Radius for building happiness effects
+WORK_RADIUS = 50      # Radius for work efficiency bonus
+BASE_RESOURCE_COST = 10
+INVENTORY_UPDATE_RATE = 60
+
+# Camera Configuration
+CAMERA_ZOOM_SPEED = 0.1
+
+# Social Configuration
 WORKING_AGE = 18
 RETIREMENT_AGE = 70
 LIFE_EXPECTANCY = 90
 REPRODUCTION_AGE_MIN = 20
 REPRODUCTION_AGE_MAX = 60
-INITIAL_COLONISTS = 200  # Target initial number of colonists; actual count depends on valid grid placement
+INITIAL_COLONISTS = 200
 REPRODUCTION_BASE_CHANCE = 0.2
 REPRODUCTION_COOLDOWN = 10
 MARRIAGE_CHANCE = 0.2
@@ -262,9 +273,3 @@ LEARNING_RATE = 0.001
 BATCH_SIZE = 32
 INPUT_SIZE = 22
 OUTPUT_SIZE = 10
-
-# Game Balance
-HAPPINESS_RADIUS = 200  # Radius for building happiness effects
-WORK_RADIUS = 50      # Radius for work efficiency bonus
-BASE_RESOURCE_COST = 10
-INVENTORY_UPDATE_RATE = 60

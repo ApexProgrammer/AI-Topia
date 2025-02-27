@@ -80,7 +80,27 @@ class Colonist:
         self.political_alignment = random.random()  # 0 = conservative, 1 = progressive
         self.voted_for = None
 
+        # Movement and pathfinding attributes
+        self.target_position = None
+        self.current_grid_x = x // TILE_SIZE
+        self.current_grid_y = y // TILE_SIZE
+        self.interpolation_progress = 1.0
+        self.start_pos = (x, y)
+        self.prev_pos = (x, y)
+        self.next_pos = (x, y)
+        self.animation_timer = 0
+        self.direction = 'right'
+        self.is_walking = False
+        self.movement_cooldown = 0
+        self.last_move_time = 0
+        self.current_path = []  # Store path to target
+        self.path_index = 0     # Current position in path
+        self.last_target = None # Remember last valid target
+
     def update(self, speed_multiplier=1.0):
+        # Store previous position for interpolation
+        self.prev_pos = (self.x, self.y)
+        
         # Update relationships
         self.update_relationships()
         
@@ -99,6 +119,13 @@ class Colonist:
             self.animation_frame += ANIMATION_SPEED * speed_multiplier
             if self.animation_frame >= WALK_FRAMES:
                 self.animation_frame = 0
+        
+        # Update animation timer for smoother transitions
+        if self.is_walking:
+            self.animation_timer += ANIMATION_SPEED * speed_multiplier
+            if self.animation_timer >= 1.0:
+                self.animation_timer = 0
+                self.animation_frame = (self.animation_frame + 1) % WALK_FRAMES
         
         self.update_basic_needs(speed_multiplier)
         self.update_happiness()
@@ -236,188 +263,180 @@ class Colonist:
                     self.move_to_job(job)
 
     def move_to_job(self, job):
-        """Move to and take a job"""
-        current_grid_x, current_grid_y = self.world.get_grid_position(self.x, self.y)
+        """Move to and take a job with improved pathfinding"""
+        if not job:
+            return False
+            
         job_grid_x, job_grid_y = self.world.get_grid_position(job.x, job.y)
         
-        # Find walkable position near job
+        # Find best adjacent position to job
+        best_pos = None
+        shortest_path = None
+        
         for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
-            target_x = job_grid_x + dx
-            target_y = job_grid_y + dy
+            check_x = job_grid_x + dx
+            check_y = job_grid_y + dy
             
-            if (0 <= target_x < self.world.current_size and 
-                0 <= target_y < self.world.current_size):
+            if (0 <= check_x < self.world.current_size and 
+                0 <= check_y < self.world.current_size):
                 
-                # Remove from current position
-                self.world.remove_from_grid(self, current_grid_x, current_grid_y)
-                
-                # Move to new position
-                target_pos = self.world.get_pixel_position(target_x, target_y)
-                self.target_position = target_pos
-                
-                # Add to new position
-                self.world.add_to_grid(self, target_x, target_y)
-                
-                # Assign job
-                self.job = job
-                job.employee = self
-                self.happiness += 10  # Happy to get a job
-                break
+                # Check if position is walkable
+                occupants = self.world.get_grid_occupants(check_x, check_y)
+                if not any(isinstance(occupant, Building) for occupant in occupants):
+                    test_pos = self.world.get_pixel_position(check_x, check_y)
+                    if self.set_target_position(test_pos):
+                        path_len = len(self.current_path)
+                        if shortest_path is None or path_len < shortest_path:
+                            shortest_path = path_len
+                            best_pos = test_pos
+                            
+        if best_pos:
+            self.target_position = best_pos
+            self.job = job
+            job.employee = self
+            self.happiness += 10
+            return True
+            
+        return False
 
     def move_towards_target(self):
-        """Move towards target position with grid-based movement"""
-        if not self.target_position and random.random() < 0.02:  # 2% chance to start random movement
-            self.random_movement()
+        """Move towards target position with improved pathfinding"""
+        if not self.target_position:
+            if random.random() < 0.005:
+                self.random_movement()
+            return
+
+        # Handle interpolation between grid positions
+        if self.interpolation_progress < 1.0:
+            # Simple linear interpolation at constant speed
+            self.interpolation_progress = min(1.0, self.interpolation_progress + MOVEMENT_SPEED)
             
-        if self.target_position:
-            # Get current grid position
+            # Update position with linear interpolation
+            self.x = self.start_pos[0] + (self.next_pos[0] - self.start_pos[0]) * self.interpolation_progress
+            self.y = self.start_pos[1] + (self.next_pos[1] - self.start_pos[1]) * self.interpolation_progress
+            
+            # Update animation state continuously
+            self.is_walking = True
+            self.animation_timer = (self.animation_timer + ANIMATION_SPEED) % 1.0
+            return
+
+        # Check if we need a new path
+        if not self.current_path:
+            # Try to set target again or clear it if invalid
+            if not self.set_target_position(self.target_position):
+                self.target_position = None
+                self.is_walking = False
+                return
+
+        # Get next path position
+        if self.path_index < len(self.current_path):
+            next_grid_x, next_grid_y = self.current_path[self.path_index]
             current_grid_x, current_grid_y = self.world.get_grid_position(self.x, self.y)
-            
-            # Calculate target grid position
-            target_x, target_y = self.target_position
-            target_grid_x, target_grid_y = self.world.get_grid_position(target_x, target_y)
-            
-            # Calculate grid-based movement
-            dx = target_grid_x - current_grid_x
-            dy = target_grid_y - current_grid_y
+
+            # Update direction based on movement
+            dx = next_grid_x - current_grid_x
+            dy = next_grid_y - current_grid_y
             
             if dx != 0 or dy != 0:
                 # Remove from current grid
                 self.world.remove_from_grid(self, current_grid_x, current_grid_y)
-                
-                # Determine movement direction
+
+                # Update direction based on primary movement axis
                 if abs(dx) > abs(dy):
-                    # Move horizontally
-                    move_x = 1 if dx > 0 else -1
-                    new_grid_x = current_grid_x + move_x
-                    new_grid_y = current_grid_y
                     self.direction = 'right' if dx > 0 else 'left'
                 else:
-                    # Move vertically
-                    move_y = 1 if dy > 0 else -1
-                    new_grid_x = current_grid_x
-                    new_grid_y = current_grid_y + move_y
                     self.direction = 'down' if dy > 0 else 'up'
+
+                # Store positions for interpolation
+                self.start_pos = (self.x, self.y)
+                new_pos = self.world.get_pixel_position(next_grid_x, next_grid_y)
+                self.next_pos = new_pos
+                self.interpolation_progress = 0.0
                 
-                # Check if new position is valid
-                if (0 <= new_grid_x < self.world.current_size and 
-                    0 <= new_grid_y < self.world.current_size):
-                    
-                    # Convert to pixel coordinates
-                    new_pos = self.world.get_pixel_position(new_grid_x, new_grid_y)
-                    self.x = new_pos[0]
-                    self.y = new_pos[1]
-                    
-                    # Add to new grid position
-                    self.world.add_to_grid(self, new_grid_x, new_grid_y)
-                    self.is_walking = True
-                    
-                    # Update animation
-                    self.animation_frame += ANIMATION_SPEED
-                    if self.animation_frame >= WALK_FRAMES:
-                        self.animation_frame = 0
-                else:
-                    # Invalid position, stop movement
-                    self.target_position = None
-                    self.is_walking = False
-                    self.world.add_to_grid(self, current_grid_x, current_grid_y)
+                # Add to new grid position
+                self.world.add_to_grid(self, next_grid_x, next_grid_y)
+                self.is_walking = True
+                self.path_index += 1
             else:
-                # Reached target
-                self.target_position = None
-                self.is_walking = False
+                # Reached target grid position
+                self.path_index += 1
+        else:
+            # Reached end of path
+            self.target_position = None
+            self.current_path = []
+            self.path_index = 0
+            self.is_walking = False
 
     def random_movement(self):
         """Generate random movement within the grid"""
         if not self.target_position:
-            # Get current grid position
             current_grid_x, current_grid_y = self.world.get_grid_position(self.x, self.y)
             
-            # Choose random direction
+            # Try each direction in random order
             directions = [(0,1), (1,0), (0,-1), (-1,0)]
-            dx, dy = random.choice(directions)
+            random.shuffle(directions)
             
-            new_grid_x = current_grid_x + dx
-            new_grid_y = current_grid_y + dy
-            
-            # Check if new position is valid
-            if (0 <= new_grid_x < self.world.current_size and 
-                0 <= new_grid_y < self.world.current_size):
+            for dx, dy in directions:
+                new_grid_x = current_grid_x + dx
+                new_grid_y = current_grid_y + dy
                 
-                # Check if position is occupied by a building
-                occupants = self.world.get_grid_occupants(new_grid_x, new_grid_y)
-                if not any(isinstance(occupant, Building) for occupant in occupants):
-                    # Convert to pixel coordinates
-                    target_pos = self.world.get_pixel_position(new_grid_x, new_grid_y)
-                    self.target_position = target_pos
-
-    def seek_job(self):
-        """Find and move to an available job"""
-        available_jobs = self.world.get_available_jobs()
-        if available_jobs:
-            job = random.choice(available_jobs)
-            current_grid_x, current_grid_y = self.world.get_grid_position(self.x, self.y)
-            job_grid_x, job_grid_y = self.world.get_grid_position(job.x, job.y)
-            
-            # Find walkable position near job
-            for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
-                target_x = job_grid_x + dx
-                target_y = job_grid_y + dy
-                
-                if (0 <= target_x < self.world.current_size and 
-                    0 <= target_y < self.world.current_size):
+                if (0 <= new_grid_x < self.world.current_size and 
+                    0 <= new_grid_y < self.world.current_size):
                     
-                    # Remove from current position
-                    self.world.remove_from_grid(self, current_grid_x, current_grid_y)
-                    
-                    # Move to new position
-                    target_pos = self.world.get_pixel_position(target_x, target_y)
-                    self.target_position = target_pos
-                    
-                    # Add to new position
-                    self.world.add_to_grid(self, target_x, target_y)
-                    
-                    # Assign job
-                    self.job = job
-                    job.employee = self
-                    break
+                    # Check if position is walkable
+                    occupants = self.world.get_grid_occupants(new_grid_x, new_grid_y)
+                    if not any(isinstance(occupant, Building) for occupant in occupants):
+                        target_pos = self.world.get_pixel_position(new_grid_x, new_grid_y)
+                        if self.set_target_position(target_pos):
+                            break
 
     def seek_home(self):
-        """Find and move to an available home"""
+        """Find and move to an available home with improved pathfinding"""
         available_homes = self.world.get_available_homes()
-        if available_homes:
-            home = random.choice(available_homes)
-            current_grid_x, current_grid_y = self.world.get_grid_position(self.x, self.y)
+        if not available_homes:
+            return False
+            
+        # Find closest available home with valid path
+        best_home = None
+        shortest_path = None
+        best_pos = None
+        
+        for home in available_homes:
             home_grid_x, home_grid_y = self.world.get_grid_position(home.x, home.y)
             
-            # Find walkable position near home
+            # Check adjacent positions
             for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
-                target_x = home_grid_x + dx
-                target_y = home_grid_y + dy
+                check_x = home_grid_x + dx
+                check_y = home_grid_y + dy
                 
-                if (0 <= target_x < self.world.current_size and 
-                    0 <= target_y < self.world.current_size):
+                if (0 <= check_x < self.world.current_size and 
+                    0 <= check_y < self.world.current_size):
                     
-                    # Remove from current position
-                    self.world.remove_from_grid(self, current_grid_x, current_grid_y)
-                    
-                    # Move to new position
-                    target_pos = self.world.get_pixel_position(target_x, target_y)
-                    self.target_position = target_pos
-                    
-                    # Add to new position
-                    self.world.add_to_grid(self, target_x, target_y)
-                    
-                    # Assign home
-                    self.home = home
-                    home.current_occupants += 1
-                    break
+                    # Check if position is walkable
+                    occupants = self.world.get_grid_occupants(check_x, check_y)
+                    if not any(isinstance(occupant, Building) for occupant in occupants):
+                        test_pos = self.world.get_pixel_position(check_x, check_y)
+                        if self.set_target_position(test_pos):
+                            path_len = len(self.current_path)
+                            if shortest_path is None or path_len < shortest_path:
+                                shortest_path = path_len
+                                best_pos = test_pos
+                                best_home = home
+                                
+        if best_pos and best_home:
+            self.target_position = best_pos
+            self.home = best_home
+            best_home.current_occupants += 1
+            return True
+            
+        return False
 
     def seek_social_interaction(self):
-        """Move towards other colonists"""
+        """Move towards other colonists with improved pathfinding"""
         current_grid_x, current_grid_y = self.world.get_grid_position(self.x, self.y)
         range_tiles = 5
         
-        # Find nearby colonists
+        # Find nearby colonists and sort by distance
         nearby_colonists = []
         for dx in range(-range_tiles, range_tiles + 1):
             for dy in range(-range_tiles, range_tiles + 1):
@@ -426,23 +445,32 @@ class Colonist:
                 if (0 <= check_x < self.world.current_size and 
                     0 <= check_y < self.world.current_size):
                     occupants = self.world.get_grid_occupants(check_x, check_y)
-                    nearby_colonists.extend([o for o in occupants 
-                                          if isinstance(o, Colonist) and o != self])
+                    colonists = [o for o in occupants 
+                               if isinstance(o, Colonist) and o != self]
+                    for colonist in colonists:
+                        dist = abs(dx) + abs(dy)  # Manhattan distance
+                        nearby_colonists.append((dist, colonist))
         
+        # Sort by distance and try each colonist until we find a valid path
         if nearby_colonists:
-            target = random.choice(nearby_colonists)
-            target_grid_x, target_grid_y = self.world.get_grid_position(target.x, target.y)
+            nearby_colonists.sort(key=lambda x: x[0])
+            for _, target in nearby_colonists:
+                target_grid_x, target_grid_y = self.world.get_grid_position(target.x, target.y)
+                
+                # Try positions near target in order of proximity
+                for dx, dy in [(0,0), (0,1), (1,0), (0,-1), (-1,0)]:
+                    check_x = target_grid_x + dx
+                    check_y = target_grid_y + dy
+                    if (0 <= check_x < self.world.current_size and 
+                        0 <= check_y < self.world.current_size):
+                        # Check if position is walkable
+                        occupants = self.world.get_grid_occupants(check_x, check_y)
+                        if not any(isinstance(occupant, Building) for occupant in occupants):
+                            test_pos = self.world.get_pixel_position(check_x, check_y)
+                            if self.set_target_position(test_pos):
+                                return True
             
-            # Find nearby empty tile
-            for dx, dy in [(0,0), (0,1), (1,0), (0,-1), (-1,0)]:
-                check_x = target_grid_x + dx
-                check_y = target_grid_y + dy
-                if (0 <= check_x < self.world.current_size and 
-                    0 <= check_y < self.world.current_size):
-                    occupants = self.world.get_grid_occupants(check_x, check_y)
-                    if not any(isinstance(occupant, Building) for occupant in occupants):
-                        self.target_position = self.world.get_pixel_position(check_x, check_y)
-                        break
+        return False
 
     def seek_partner(self):
         """Find and move towards a potential partner"""
@@ -481,28 +509,60 @@ class Colonist:
         color = (255, 200, 200) if self.gender == 'F' else (200, 200, 255)
         pygame.draw.circle(screen, color, (screen_x, screen_y), size)
         
-        # Draw walking animation
+        # Enhanced walking animation with consistent leg length across all directions
         if self.is_walking:
-            leg_offset = abs(math.sin(self.animation_frame * math.pi)) * 3 * zoom
-            if self.direction in ['left', 'right']:
-                # Draw legs
+            # Calculate leg movement using sine wave
+            leg_phase = self.animation_timer * math.pi * 2
+            leg_length = 6 * zoom  # Standard leg length
+            step_offset = abs(math.sin(leg_phase)) * 3 * zoom  # Reduced offset for more natural look
+            
+            # Base positions for legs
+            base_left = screen_x - 3 * zoom
+            base_right = screen_x + 3 * zoom
+            base_y = screen_y + size
+            
+            # Draw legs based on direction
+            if self.direction == 'right':
+                # Right movement - legs swing forward/back
+                leg_y = base_y + leg_length
                 pygame.draw.line(screen, color,
-                               (screen_x, screen_y + size),
-                               (screen_x - leg_offset, screen_y + size + 5 * zoom), 
+                               (base_left, base_y),
+                               (base_left - step_offset, leg_y),
                                max(1, int(2 * zoom)))
                 pygame.draw.line(screen, color,
-                               (screen_x, screen_y + size),
-                               (screen_x + leg_offset, screen_y + size + 5 * zoom),
+                               (base_right, base_y),
+                               (base_right + step_offset, leg_y),
                                max(1, int(2 * zoom)))
-            else:
-                # Draw legs for up/down movement
+            elif self.direction == 'left':
+                # Left movement - legs swing forward/back (mirrored)
+                leg_y = base_y + leg_length
                 pygame.draw.line(screen, color,
-                               (screen_x - 2 * zoom, screen_y + size),
-                               (screen_x - 2 * zoom, screen_y + size + leg_offset),
+                               (base_left, base_y),
+                               (base_left + step_offset, leg_y),
                                max(1, int(2 * zoom)))
                 pygame.draw.line(screen, color,
-                               (screen_x + 2 * zoom, screen_y + size),
-                               (screen_x + 2 * zoom, screen_y + size - leg_offset),
+                               (base_right, base_y),
+                               (base_right - step_offset, leg_y),
+                               max(1, int(2 * zoom)))
+            elif self.direction == 'up':
+                # Up movement - legs move side to side
+                pygame.draw.line(screen, color,
+                               (base_left - step_offset, base_y),
+                               (base_left - step_offset, base_y + leg_length),
+                               max(1, int(2 * zoom)))
+                pygame.draw.line(screen, color,
+                               (base_right + step_offset, base_y),
+                               (base_right + step_offset, base_y + leg_length),
+                               max(1, int(2 * zoom)))
+            else:  # down
+                # Down movement - legs move side to side
+                pygame.draw.line(screen, color,
+                               (base_left + step_offset, base_y),
+                               (base_left + step_offset, base_y + leg_length),
+                               max(1, int(2 * zoom)))
+                pygame.draw.line(screen, color,
+                               (base_right - step_offset, base_y),
+                               (base_right - step_offset, base_y + leg_length),
                                max(1, int(2 * zoom)))
         
         # Draw current activity indicator
@@ -676,9 +736,138 @@ class Colonist:
             self.work_experience += 0.1
 
     def visit_nearest_shop(self):
-        """Find and move to the nearest shop"""
+        """Find and move to the nearest shop with pathfinding"""
         shops = [b for b in self.world.buildings if b.building_type == 'shop']
-        if shops:
-            # Find nearest shop
-            nearest_shop = min(shops, key=lambda b: ((b.x - self.x)**2 + (b.y - self.y)**2)**0.5)
-            self.target_position = (nearest_shop.x, nearest_shop.y)
+        if not shops:
+            return False
+        
+        # Sort shops by distance and try each until we find a valid path
+        current_grid_x, current_grid_y = self.world.get_grid_position(self.x, self.y)
+        shop_distances = []
+        
+        for shop in shops:
+            shop_grid_x, shop_grid_y = self.world.get_grid_position(shop.x, shop.y)
+            dist = abs(shop_grid_x - current_grid_x) + abs(shop_grid_y - current_grid_y)
+            shop_distances.append((dist, shop))
+        
+        shop_distances.sort(key=lambda x: x[0])
+        
+        for _, shop in shop_distances:
+            shop_grid_x, shop_grid_y = self.world.get_grid_position(shop.x, shop.y)
+            
+            # Try positions adjacent to shop
+            for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
+                check_x = shop_grid_x + dx
+                check_y = shop_grid_y + dy
+                if (0 <= check_x < self.world.current_size and 
+                    0 <= check_y < self.world.current_size):
+                    # Check if position is walkable
+                    occupants = self.world.get_grid_occupants(check_x, check_y)
+                    if not any(isinstance(occupant, Building) for occupant in occupants):
+                        test_pos = self.world.get_pixel_position(check_x, check_y)
+                        if self.set_target_position(test_pos):
+                            return True
+        
+        return False
+
+    def set_target_position(self, target_pos):
+        """Set a new target position with validation"""
+        if not target_pos or not self.world:
+            return False
+            
+        # Convert target to grid coordinates
+        target_grid_x, target_grid_y = self.world.get_grid_position(target_pos[0], target_pos[1])
+        current_grid_x, current_grid_y = self.world.get_grid_position(self.x, self.y)
+        
+        # Validate target is within bounds
+        if not (0 <= target_grid_x < self.world.current_size and 
+                0 <= target_grid_y < self.world.current_size):
+            return False
+            
+        # Check if target is occupied by a building
+        occupants = self.world.get_grid_occupants(target_grid_x, target_grid_y)
+        if any(isinstance(occupant, Building) for occupant in occupants):
+            # Find nearest accessible position
+            for dx, dy in [(0,1), (1,0), (0,-1), (-1,0), (1,1), (-1,1), (1,-1), (-1,-1)]:
+                check_x = target_grid_x + dx
+                check_y = target_grid_y + dy
+                if (0 <= check_x < self.world.current_size and 
+                    0 <= check_y < self.world.current_size):
+                    check_occupants = self.world.get_grid_occupants(check_x, check_y)
+                    if not any(isinstance(occupant, Building) for occupant in check_occupants):
+                        target_grid_x, target_grid_y = check_x, check_y
+                        break
+            else:
+                return False  # No accessible position found
+        
+        # Calculate path to target
+        self.current_path = self.find_path(current_grid_x, current_grid_y, 
+                                         target_grid_x, target_grid_y)
+        if not self.current_path:
+            return False
+            
+        self.target_position = target_pos
+        self.last_target = target_pos
+        self.path_index = 0
+        return True
+
+    def find_path(self, start_x, start_y, target_x, target_y):
+        """Simple A* pathfinding"""
+        if not (0 <= target_x < self.world.current_size and 
+               0 <= target_y < self.world.current_size):
+            return []
+            
+        # Manhattan distance heuristic
+        def heuristic(x, y):
+            return abs(target_x - x) + abs(target_y - y)
+        
+        # Initialize search with a more robust open set structure
+        open_set = {(start_x, start_y)}  # Use set for O(1) operations
+        open_set_f = {(start_x, start_y): heuristic(start_x, start_y)}  # Track f scores
+        came_from = {}
+        g_score = {(start_x, start_y): 0}
+        
+        while open_set:
+            # Find node with minimum f_score
+            current = min(open_set, key=lambda pos: open_set_f[pos])
+            current_x, current_y = current
+            
+            if current_x == target_x and current_y == target_y:
+                # Reconstruct path
+                path = []
+                while current in came_from:
+                    path.append(current)
+                    current = came_from[current]
+                path.append((start_x, start_y))
+                path.reverse()
+                return path
+                
+            # Remove current from open set
+            open_set.remove(current)
+            open_set_f.pop(current)
+            
+            # Check neighbors
+            for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
+                next_x, next_y = current_x + dx, current_y + dy
+                neighbor = (next_x, next_y)
+                
+                if not (0 <= next_x < self.world.current_size and 
+                       0 <= next_y < self.world.current_size):
+                    continue
+                    
+                # Check if neighbor is walkable
+                occupants = self.world.get_grid_occupants(next_x, next_y)
+                if any(isinstance(occupant, Building) for occupant in occupants):
+                    continue
+                
+                tentative_g = g_score[current] + 1
+                
+                if neighbor not in g_score or tentative_g < g_score[neighbor]:
+                    # Found better path to neighbor
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g
+                    f_score = tentative_g + heuristic(next_x, next_y)
+                    open_set_f[neighbor] = f_score
+                    open_set.add(neighbor)
+        
+        return []  # No path found

@@ -25,9 +25,9 @@ METAL_PRODUCTION_RATE = 0.15
 GOODS_PRODUCTION_RATE = 0.2
 
 # Colonist Configuration
-COLONIST_SPEED = 0.05
-MOVEMENT_SPEED = 0.05
-DIAGONAL_MOVEMENT = False
+COLONIST_SPEED = 0.2  # Increased from 0.008 for faster movement
+MOVEMENT_SPEED = 0.2  # Increased from 0.008 for faster movement
+DIAGONAL_MOVEMENT = True  # Enable diagonal movement for smoother paths
 WORKING_AGE = 18
 RETIREMENT_AGE = 70
 LIFE_EXPECTANCY = 90
@@ -238,8 +238,8 @@ BASE_STORAGE_CAPACITY = 100
 STORAGE_MULTIPLIER = 2.0  # Storage capacity multiplier for specialized buildings
 
 # Animation Configuration
-ANIMATION_SPEED = 0.05
-WALK_FRAMES = 8
+ANIMATION_SPEED = 0.2  # Match exactly with movement speed for perfect sync
+WALK_FRAMES = 16  # Reduced for smoother animation cycle
 
 # Population Thresholds for Expansion
 COLONISTS_PER_TILE = 2

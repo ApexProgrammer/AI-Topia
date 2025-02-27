@@ -97,25 +97,18 @@ class World:
         return (x, y) if y is not None else x
 
     def screen_to_world(self, pos):
-        """Convert screen coordinates to world coordinates with precise grid alignment"""
-        if isinstance(pos, tuple):
-            x, y = pos
-        else:
-            x = pos
-            y = None
+        """Convert screen coordinates to world coordinates"""
+        if self.ui:
+            # Remove camera offset and apply zoom
+            world_x = (pos[0] - self.ui.camera_x) / self.ui.zoom
+            world_y = (pos[1] - self.ui.camera_y) / self.ui.zoom
             
-        if self.screen_width and self.screen_height:
-            # Account for centered world offset
-            x = x - (self.screen_width - self.width) // 2
-            if y is not None:
-                y = y - (self.screen_height - self.height) // 2
-        
-        # Snap to grid
-        x = (x // TILE_SIZE) * TILE_SIZE
-        if y is not None:
-            y = (y // TILE_SIZE) * TILE_SIZE
-        
-        return (x, y) if y is not None else x
+            # Remove world offset
+            world_x -= self.offset_x
+            world_y -= self.offset_y
+            
+            return (world_x, world_y)
+        return pos
 
     def get_grid_position(self, x, y=None):
         """Convert world coordinates to grid coordinates with proper alignment"""
@@ -136,17 +129,16 @@ class World:
     def get_pixel_position(self, x, y=None):
         """Convert grid coordinates to world coordinates (center of tile)"""
         if y is None and isinstance(x, (tuple, list)):
-            x, y = x
-            
-        # Convert to pixel coordinates - align to grid perfectly
-        world_x = (x * TILE_SIZE)
-        world_y = (y * TILE_SIZE)
+            x, y = x[0], x[1]
         
-        if self.screen_width and self.screen_height:
-            # Add centering offset
-            world_x += (self.screen_width - self.width) // 2
-            world_y += (self.screen_height - self.height) // 2
-            
+        # Convert to pixel coordinates and center in tile
+        world_x = x * TILE_SIZE + TILE_SIZE // 2
+        world_y = y * TILE_SIZE + TILE_SIZE // 2
+        
+        # Add world offset
+        world_x += self.offset_x
+        world_y += self.offset_y
+        
         return (world_x, world_y)
 
     def find_building_location(self, building_type):

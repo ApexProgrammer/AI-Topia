@@ -146,7 +146,15 @@ class UI:
 
     def handle_event(self, event):
         """Main event handler for all UI interactions"""
-        if event.type == pygame.MOUSEBUTTONDOWN:
+        if event.type == pygame.KEYDOWN:
+            if event.key in self.keys_pressed:
+                self.keys_pressed[event.key] = True
+                
+        elif event.type == pygame.KEYUP:
+            if event.key in self.keys_pressed:  # Add key release handling
+                self.keys_pressed[event.key] = False
+
+        elif event.type == pygame.MOUSEBUTTONDOWN:
             mouse_pos = pygame.mouse.get_pos()
             
             # Handle button clicks

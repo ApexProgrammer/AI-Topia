@@ -240,14 +240,19 @@ class Building:
 
     def render(self, screen, camera_x=0, camera_y=0, zoom=1.0):
         """Render building with improved visual feedback"""
-        # Calculate screen position
-        screen_x = (self.x - camera_x) * zoom
-        screen_y = (self.y - camera_y) * zoom
+        # Calculate screen position with correct offset
+        screen_x = int((self.x + camera_x) * zoom)
+        screen_y = int((self.y + camera_y) * zoom)
         
-        # Calculate size based on building configuration
-        total_size = self.base_size * zoom
+        # Calculate size based on building configuration and zoom
+        size = int(self.size * TILE_SIZE * zoom)
+        
+        # Center the building on its grid position
+        screen_x -= size // 2
+        screen_y -= size // 2
         
         # Draw building base
+        building_rect = pygame.Rect(screen_x, screen_y, size, size)
         color = self.colors.get(self.building_type, (200, 200, 200))
         if not self.is_complete:
             # Show construction progress
@@ -255,7 +260,6 @@ class Building:
             color = tuple(int(c * (0.5 + 0.5 * progress)) for c in color)
         
         # Draw with proper grid alignment
-        building_rect = pygame.Rect(screen_x, screen_y, total_size, total_size)
         pygame.draw.rect(screen, color, building_rect)
         
         # Draw grid lines for multi-tile buildings
@@ -264,11 +268,11 @@ class Building:
                 # Vertical lines
                 pygame.draw.line(screen, (100, 100, 100),
                                (screen_x + i * TILE_SIZE * zoom, screen_y),
-                               (screen_x + i * TILE_SIZE * zoom, screen_y + total_size))
+                               (screen_x + i * TILE_SIZE * zoom, screen_y + size))
                 # Horizontal lines
                 pygame.draw.line(screen, (100, 100, 100),
                                (screen_x, screen_y + i * TILE_SIZE * zoom),
-                               (screen_x + total_size, screen_y + i * TILE_SIZE * zoom))
+                               (screen_x + size, screen_y + i * TILE_SIZE * zoom))
         
         # Show building status indicators
         if self.is_complete:
@@ -278,20 +282,20 @@ class Building:
                 if self.jobs and filled_jobs < len(self.jobs):
                     # Draw "Help Wanted" indicator
                     pygame.draw.circle(screen, (255, 200, 0),
-                                    (int(screen_x + total_size - 5), int(screen_y + 5)), 
+                                    (int(screen_x + size - 5), int(screen_y + 5)), 
                                     int(3 * zoom))
             elif self.building_type == 'house':
                 # Show occupancy for houses
                 if self.current_occupants < self.capacity:
                     # Draw "Vacancy" indicator
                     pygame.draw.circle(screen, (100, 255, 100),
-                                    (int(screen_x + total_size - 5), int(screen_y + 5)),
+                                    (int(screen_x + size - 5), int(screen_y + 5)),
                                     int(3 * zoom))
         else:
             # Show construction progress bar
-            progress_width = (total_size - 4) * (self.construction_progress / self.build_time)
+            progress_width = (size - 4) * (self.construction_progress / self.build_time)
             pygame.draw.rect(screen, (200, 200, 200),
-                            (screen_x + 2, screen_y + total_size - 4,
+                            (screen_x + 2, screen_y + size - 4,
                              progress_width, 3 * zoom))
 
     def add_occupant(self):

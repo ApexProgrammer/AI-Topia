@@ -1,91 +1,69 @@
-import sys, subprocess, pygame, importlib  # added importlib
-import game.config as config  # Adjust config dynamically
+import sys, pygame
+import game.config as config
 
 pygame.init()
 screen = pygame.display.set_mode((config.WINDOW_WIDTH, config.WINDOW_HEIGHT))
 pygame.display.set_caption("AI-Topia - Game Menu")
 
+# Use the same modern UI color scheme from ui.py
+COLORS = {
+    'background': (18, 18, 24),
+    'panel': (30, 30, 40),
+    'accent': (86, 155, 255),
+    'accent_hover': (120, 180, 255),
+    'text': (255, 255, 255),
+    'text_secondary': (180, 180, 200),
+    'text_header': (200, 200, 255),
+    'button': (60, 60, 80),
+    'button_hover': (80, 80, 100),
+    'border': (100, 100, 150)
+}
+
 def run_menu(screen):
-    # Use default pygame font instead of custom font
+    # Use default pygame font
     font = pygame.font.Font(None, 36)
     title_font = pygame.font.Font(None, 72)
     subtitle_font = pygame.font.Font(None, 32)
     clock = pygame.time.Clock()
 
-    # Reorder menu items to put START GAME first
-    options = [
-        {"name": "INITIAL_COLONISTS", "display": "INITIAL COLONISTS", "value": config.INITIAL_COLONISTS, "min": 50, "max": 500, "step": 10},
-        {"name": "TILE_SIZE", "display": "TILE SIZE", "value": config.TILE_SIZE, "min": 16, "max": 64, "step": 4}
-    ]
-    menu_items = ["START GAME"] + [opt["display"] for opt in options]
-    selected_index = 0
     running = True
+    button_hovered = False
 
-    def handle_mouse_click(pos):
-        for i, item in enumerate(menu_items):
-            y_position = 180 + i * 70
-            text = item if item == "START GAME" else f"{item}: {next(o for o in options if o['display'] == item)['value']}"
-            
-            # Calculate button dimensions
-            rendered = font.render(text, True, (255, 255, 255))
-            text_width = rendered.get_width()
-            button_width = max(300, text_width + 40)
-            button_height = 50
-            button_x = config.WINDOW_WIDTH // 2 - button_width // 2
-            button_rect = pygame.Rect(button_x, y_position - 10, button_width, button_height)
-            
-            if button_rect.collidepoint(pos):
-                return i
-        return None
+    # Calculate button dimensions and position
+    button_width = 300
+    button_height = 60
+    button_x = config.WINDOW_WIDTH // 2 - button_width // 2
+    button_y = config.WINDOW_HEIGHT // 2
+    start_button = pygame.Rect(button_x, button_y, button_width, button_height)
 
     def render_menu():
-        # Clean black background
-        screen.fill((0, 0, 0))
+        # Draw modern background
+        screen.fill(COLORS['background'])
 
-        # Draw title with white text
-        title_text = title_font.render("AI-Topia", True, (255, 255, 255))
-        subtitle_text = subtitle_font.render("Help your AI civilization survive!", True, (200, 200, 200))
-        title_rect = title_text.get_rect(center=(config.WINDOW_WIDTH // 2, 60))
-        subtitle_rect = subtitle_text.get_rect(center=(config.WINDOW_WIDTH // 2, 120))
+        # Draw title with modern styling
+        title_text = title_font.render("AI-Topia", True, COLORS['text_header'])
+        subtitle_text = subtitle_font.render("Help your AI civilization survive!", True, COLORS['text_secondary'])
+        title_rect = title_text.get_rect(center=(config.WINDOW_WIDTH // 2, config.WINDOW_HEIGHT // 3))
+        subtitle_rect = subtitle_text.get_rect(center=(config.WINDOW_WIDTH // 2, config.WINDOW_HEIGHT // 3 + 60))
         screen.blit(title_text, title_rect)
         screen.blit(subtitle_text, subtitle_rect)
 
-        # Draw menu items with button backgrounds
-        for i, item in enumerate(menu_items):
-            y_position = 180 + i * 70  # Increased spacing between items
-            
-            # Get text content first to determine button width
-            if item == "START GAME":
-                text = item
-            else:
-                opt = next(o for o in options if o["display"] == item)
-                text = f"{item}: {opt['value']}"
-            
-            # Calculate required button width based on text
-            rendered = font.render(text, True, (255, 255, 255))
-            text_width = rendered.get_width()
-            button_width = max(300, text_width + 40)  # Minimum 300px or text width + padding
-            button_height = 50
-            
-            # Center button
-            button_x = config.WINDOW_WIDTH // 2 - button_width // 2
-            button_rect = pygame.Rect(button_x, y_position - 10, button_width, button_height)
-            
-            # Draw button - simplified styling
-            if i == selected_index:
-                # Selected button is filled white with black text
-                pygame.draw.rect(screen, (255, 255, 255), button_rect)
-                color = (0, 0, 0)
-            else:
-                # Unselected button is just white outline
-                pygame.draw.rect(screen, (0, 0, 0), button_rect)
-                pygame.draw.rect(screen, (255, 255, 255), button_rect, 2)
-                color = (255, 255, 255)
-            
-            # Draw text centered in button
-            rendered = font.render(text, True, color)
-            text_rect = rendered.get_rect(center=button_rect.center)
-            screen.blit(rendered, text_rect)
+        # Draw start button with modern styling
+        button_color = COLORS['button_hover'] if button_hovered else COLORS['button']
+        pygame.draw.rect(screen, button_color, start_button, border_radius=4)
+        pygame.draw.rect(screen, COLORS['border'], start_button, 1, border_radius=4)
+        
+        # Draw button text
+        start_text = font.render("START GAME", True, COLORS['text'])
+        text_rect = start_text.get_rect(center=start_button.center)
+        screen.blit(start_text, text_rect)
+
+        # Draw hover effect with reduced intensity
+        if button_hovered:
+            s = pygame.Surface((start_button.width, start_button.height))
+            s.set_alpha(15)  # Reduced from 30 to 15 for more subtle effect
+            s.fill((255, 255, 255))
+            screen.blit(s, start_button, special_flags=pygame.BLEND_ADD)
 
         pygame.display.flip()
 
@@ -93,41 +71,16 @@ def run_menu(screen):
         clock.tick(30)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False  # Let caller decide how to quit
+                running = False
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1:  # Left click
-                    clicked_index = handle_mouse_click(event.pos)
-                    if clicked_index is not None:
-                        selected_index = clicked_index
-                        if menu_items[selected_index] == "START GAME":
-                            for opt in options:
-                                setattr(config, opt["name"], opt["value"])
-                            importlib.reload(config)  # force reload to apply updated values
-                            running = False
+                if event.button == 1 and start_button.collidepoint(event.pos):
+                    running = False
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_DOWN:
-                    selected_index = (selected_index + 1) % len(menu_items)
-                elif event.key == pygame.K_UP:
-                    selected_index = (selected_index - 1) % len(menu_items)
-                elif event.key == pygame.K_LEFT:
-                    if menu_items[selected_index] != "START GAME":
-                        opt = next(o for o in options if o["display"] == menu_items[selected_index])
-                        opt["value"] = max(opt["min"], opt["value"] - opt["step"])
-                elif event.key == pygame.K_RIGHT:
-                    if menu_items[selected_index] != "START GAME":
-                        opt = next(o for o in options if o["display"] == menu_items[selected_index])
-                        opt["value"] = min(opt["max"], opt["value"] + opt["step"])
-                elif event.key == pygame.K_RETURN:
-                    if menu_items[selected_index] == "START GAME":
-                        for opt in options:
-                            setattr(config, opt["name"], opt["value"])
-                        importlib.reload(config)  # force reload to apply updated values
-                        running = False
-
-        # Handle mouse hover for visual feedback
+                if event.key == pygame.K_RETURN:
+                    running = False
+        
+        # Update button hover state
         mouse_pos = pygame.mouse.get_pos()
-        hover_index = handle_mouse_click(mouse_pos)
-        if hover_index is not None and hover_index != selected_index:
-            selected_index = hover_index
-
+        button_hovered = start_button.collidepoint(mouse_pos)
+        
         render_menu()

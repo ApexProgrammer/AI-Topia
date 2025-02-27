@@ -47,10 +47,10 @@ class Button:
         text_rect = text_surface.get_rect(center=self.rect.center)
         screen.blit(text_surface, text_rect)
         
-        # Draw hover effect
+        # Draw hover effect with reduced intensity
         if self.hovered:
             s = pygame.Surface((self.rect.width, self.rect.height))
-            s.set_alpha(30)
+            s.set_alpha(15)  # Reduced from 30 to 15 for more subtle effect
             s.fill((255, 255, 255))
             screen.blit(s, self.rect, special_flags=pygame.BLEND_ADD)
 
@@ -869,10 +869,14 @@ class UI:
             # Handle click event
             if button_rect.collidepoint(pygame.mouse.get_pos()):
                 self.tooltip_text = data.get('description', '')
-                if pygame.mouse.get_pressed()[0] and can_afford:  # Only allow selection if can afford
+                if pygame.mouse.get_pressed()[0] and can_afford:
                     self.selected_building_type = building_type
-                    # Force immediate update of zones
                     self.world.update_building_zones()
+                # Add subtle hover effect
+                s = pygame.Surface((button_rect.width, button_rect.height))
+                s.set_alpha(15)  # Subtle hover effect
+                s.fill((255, 255, 255))
+                screen.blit(s, button_rect, special_flags=pygame.BLEND_ADD)
             
             y += button_height + 5
 

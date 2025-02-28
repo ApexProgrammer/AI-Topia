@@ -148,12 +148,17 @@ class UI:
         self.update_timer = 0
         self.UPDATE_INTERVAL = 30  # Update suggestions every 30 frames
 
+<<<<<<< HEAD
+        self.selected_building = None  # Add this line
+        self.show_building_info = False  # Add this line
+=======
         self.show_setup_instructions = True
         
         # Message display state
         self.message = None
         self.message_timer = 0
         self.MESSAGE_DURATION = 120  # Show messages for 2 seconds (60 fps * 2)
+>>>>>>> d5c1d8459634c8e67032028b0c4089ac46492b8f
 
     def handle_event(self, event):
         """Main event handler for all UI interactions"""
@@ -168,64 +173,40 @@ class UI:
         elif event.type == pygame.MOUSEBUTTONDOWN:
             mouse_pos = pygame.mouse.get_pos()
             
-            # Handle button clicks
-            for button_type, button in self.buttons.items():
-                if button.rect.collidepoint(mouse_pos):
-                    if button_type == 'policies':
-                        self.policy_menu_open = not self.policy_menu_open
-                        self.law_menu_open = False
-                        self.show_election_info = False
-                        self.show_building_menu = False
-                    elif button_type == 'election':
-                        self.show_election_info = not self.show_election_info
-                        self.policy_menu_open = False
-                        self.law_menu_open = False
-                        self.show_building_menu = False
-                    elif button_type == 'taxes':
-                        self.policy_menu_open = True
-                        self.law_menu_open = False
-                        self.show_election_info = False
-                        self.show_building_menu = False
-                    elif button_type == 'laws':
-                        self.law_menu_open = not self.law_menu_open
-                        self.policy_menu_open = False
-                        self.show_election_info = False
-                        self.show_building_menu = False
-                    elif button_type == 'scenario':
-                        if not self.world.scenario_manager.active_scenario:
-                            self.world.scenario_manager.trigger_scenario()
-                    elif button_type == 'build':
-                        self.show_building_menu = not self.show_building_menu
-                        if not self.show_building_menu:
-                            self.selected_building_type = None
-                            self.tooltip_text = None
-                        else:
-                            self.world.update_building_zones()
-                            self.selected_building_type = None
-                    return
+            # Handle button clicks first
+            if self.handle_button_clicks(mouse_pos):
+                return
 
-            # Handle policy menu clicks
-            if self.policy_menu_open:
-                self.handle_policy_click(mouse_pos)
+            # Handle building placement with left click only
+            if self.show_building_menu and event.button == 1:  # Left click
+                if self.selected_building_type and self.hovering_grid_pos:
+                    x, y = self.world.get_pixel_position(*self.hovering_grid_pos)
+                    success, message = self.world.build_structure(self.selected_building_type, x, y)
+                    if success:
+                        self.world.update_building_zones()
+                        self.world.update_colony_needs()
+                        self.tooltip_text = self.generate_building_suggestion()
+                    else:
+                        self.tooltip_text = message
             
-            # Handle law menu clicks
-            elif self.law_menu_open:
-                self.handle_law_click(mouse_pos)
-            
-            # Handle building placement
-            elif self.show_building_menu:
-                if event.button == 1:  # Left click
-                    if self.selected_building_type and self.hovering_grid_pos:
-                        x, y = self.world.get_pixel_position(*self.hovering_grid_pos)
-                        success, message = self.world.build_structure(self.selected_building_type, x, y)
-                        if success:
-                            self.world.update_building_zones()
-                            self.world.update_colony_needs()
-                            self.tooltip_text = self.generate_building_suggestion()
-                        else:
-                            self.tooltip_text = message
-                elif event.button == 3:  # Right click
-                    self.selected_building_type = None
+            # Handle building info on right click only
+            elif event.button == 3:  # Right click
+                # Clear any previous selection first
+                self.selected_building = None
+                self.show_building_info = False
+                
+                # Check for building clicks
+                for building in self.world.buildings:
+                    building_rect = pygame.Rect(
+                        (building.x + self.camera_x) * self.zoom - (building.base_size * self.zoom) / 2,
+                        (building.y + self.camera_y) * self.zoom - (building.base_size * self.zoom) / 2,
+                        building.base_size * self.zoom,
+                        building.base_size * self.zoom
+                    )
+                    if building_rect.collidepoint(mouse_pos):
+                        self.selected_building = building
+                        self.show_building_info = True
+                        break
 
         elif event.type == pygame.MOUSEMOTION:
             # Update button hover states
@@ -251,12 +232,51 @@ class UI:
                 self.selected_building_type = None
                 self.tooltip_text = None
 
+<<<<<<< HEAD
+    def handle_button_clicks(self, mouse_pos):
+        """Handle UI button clicks and return True if a button was clicked"""
+        for button_type, button in self.buttons.items():
+            if button.rect.collidepoint(mouse_pos):
+                if button_type == 'policies':
+                    self.policy_menu_open = not self.policy_menu_open
+                    self.law_menu_open = False
+                    self.show_election_info = False
+                    self.show_building_menu = False
+                elif button_type == 'election':
+                    self.show_election_info = not self.show_election_info
+                    self.policy_menu_open = False
+                    self.law_menu_open = False
+                    self.show_building_menu = False
+                elif button_type == 'taxes':
+                    self.policy_menu_open = True
+                    self.law_menu_open = False
+                    self.show_election_info = False
+                    self.show_building_menu = False
+                elif button_type == 'laws':
+                    self.law_menu_open = not self.law_menu_open
+                    self.policy_menu_open = False
+                    self.show_election_info = False
+                    self.show_building_menu = False
+                elif button_type == 'scenario':
+                    if not self.world.scenario_manager.active_scenario:
+                        self.world.scenario_manager.trigger_scenario()
+                elif button_type == 'build':
+                    self.show_building_menu = not self.show_building_menu
+                    if not self.show_building_menu:
+                        self.selected_building_type = None
+                        self.tooltip_text = None
+                    else:
+                        self.world.update_building_zones()
+                return True
+        return False
+=======
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:  # Left click
             # Show setup instructions until initial buildings are complete
             if not self.world.initial_setup_complete:
                 if not self.show_building_menu:
                     self.show_message("Open the Build menu to place required buildings")
                     self.show_setup_instructions = True
+>>>>>>> d5c1d8459634c8e67032028b0c4089ac46492b8f
 
     def handle_policy_click(self, mouse_pos):
         """Enhanced policy interaction handling"""
@@ -442,6 +462,11 @@ class UI:
         pygame.draw.rect(self.screen, COLORS['border'], score_bg, 1)
         self.screen.blit(score_surface, (score_x, score_y))
 
+<<<<<<< HEAD
+        # Draw building info if selected
+        if self.show_building_info and self.selected_building:
+            self._render_building_info(self.screen)
+=======
         # Show initial setup instructions and preview
         if not self.world.initial_setup_complete and self.show_setup_instructions:
             # Calculate position to show setup info on the right side
@@ -538,6 +563,7 @@ class UI:
                 (self.screen.get_width() - message_surface.get_width()) // 2,
                 100
             ))
+>>>>>>> d5c1d8459634c8e67032028b0c4089ac46492b8f
 
     def _draw_panel(self, x, y, width, height, title=None):
         """Draw a modern styled panel with optional title"""
@@ -1058,7 +1084,56 @@ class UI:
         total_happiness = sum(colonist.happiness for colonist in self.world.colonists)
         return total_happiness / len(self.world.colonists)
 
+<<<<<<< HEAD
+    def _render_building_info(self, screen):
+        """Render detailed building information panel"""
+        building = self.selected_building
+        info_width = 300
+        padding = 10
+        line_height = 25
+        
+        # Prepare info lines
+        info_lines = [
+            f"Type: {building.building_type.title()}",
+            f"Status: {'Complete' if building.is_complete else f'Building ({int(building.construction_progress/building.build_time*100)}%)'}",
+        ]
+        
+        # Add specialized info based on building type
+        if building.building_type == 'house':
+            info_lines.extend([
+                f"Occupants: {building.current_occupants}/{building.capacity}",
+                f"Happiness Bonus: +{building.happiness_bonus}"
+            ])
+        elif hasattr(building, 'jobs'):
+            filled_jobs = len([j for j in building.jobs if j.employee])
+            info_lines.extend([
+                f"Workers: {filled_jobs}/{building.max_jobs}",
+                f"Efficiency: {int(filled_jobs/building.max_jobs*100 if building.max_jobs else 0)}%"
+            ])
+        
+        if building.produces:
+            info_lines.extend([
+                f"Produces: {building.produces.title()}",
+                f"Production Rate: {building.production_rate:.1f}/day"
+            ])
+        
+        # Calculate panel dimensions
+        panel_height = len(info_lines) * line_height + padding * 2
+        
+        # Position panel near mouse but ensure it stays on screen
+        mouse_pos = pygame.mouse.get_pos()
+        panel_x = min(screen.get_width() - info_width - padding, mouse_pos[0])
+        panel_y = min(screen.get_height() - panel_height - padding, mouse_pos[1])
+        
+        # Draw panel background
+        self._draw_panel(panel_x, panel_y, info_width, panel_height, f"{building.building_type.title()} Info")
+        
+        # Draw info lines
+        for i, line in enumerate(info_lines):
+            self.draw_text(screen, line, panel_x + padding, panel_y + padding + i * line_height, COLORS['text'])
+=======
     def show_message(self, msg):
         """Display a message to the user"""
         self.message = msg
         self.message_timer = self.MESSAGE_DURATION
+>>>>>>> d5c1d8459634c8e67032028b0c4089ac46492b8f

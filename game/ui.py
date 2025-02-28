@@ -457,15 +457,16 @@ class UI:
             
             setup_status = self.world.get_initial_setup_status()
             
-            # Create instruction list without status
+            # Create instruction list with balanced resource emphasis
             instructions = [
-                "Initial Setup Required",
+                "Initial Colony Setup",
                 "---------------",
-                "Use the Build menu to place:",
-                "- Farm (For food production)",
-                "- Woodcutter (For wood production)",
-                "- Quarry (For stone production)",
-                ""
+                "Click Build Menu and place:",
+                "- Farm (Food production)",
+                "- Woodcutter (Wood production) ✓",
+                "- Quarry (Stone production) ✓",
+                "- Mine (Metal production) ✓",
+                "",
             ]
             
             # Wrap status text to fit panel width
@@ -502,7 +503,14 @@ class UI:
             # Draw instructions
             y = setup_panel_y + 30
             for line in instructions:
-                color = COLORS['text_header'] if line.startswith('Status:') else COLORS['text']
+                if "Don't focus only on" in line:
+                    color = COLORS['warning']  # Highlight warning
+                elif "All resources" in line:
+                    color = COLORS['accent']  # Highlight important info
+                elif line.startswith("Status:"):
+                    color = COLORS['text_header']
+                else:
+                    color = COLORS['text']
                 self.draw_text(self.screen, line, setup_panel_x + 10, y, color)
                 y += line_height
 
@@ -552,7 +560,7 @@ class UI:
         padding = 10
         
         # Calculate panel dimensions
-        resources = list(self.world.colony_inventory.items())
+        resources = [(resource, amount) for resource, amount in self.world.colony_inventory.items() if resource is not None]
         panel_height = (len(resources) + 4) * resource_spacing + padding * 2  # Extra space for needs
         panel_width = 280
         
@@ -563,7 +571,9 @@ class UI:
         
         # Draw resources
         for resource, amount in resources:
-            text = f"{resource.title()}: {amount:.1f}"
+            # Ensure resource is not None before calling title()
+            resource_name = resource if resource is None else resource.title()
+            text = f"{resource_name}: {amount:.1f}"
             color = COLORS['error'] if amount < 100 else COLORS['text']
             self.draw_text(screen, text, x + padding, current_y, color)
             current_y += resource_spacing
@@ -822,10 +832,12 @@ class UI:
         # Draw resource status bar at top
         resource_y = 40
         for resource, amount in self.world.colony_inventory.items():
-            text = f"{resource.title()}: {amount:.1f}"
-            color = (255, 100, 100) if amount < 100 else (255, 255, 255)
-            self.draw_text(screen, text, menu_rect.x + 10, resource_y, color, size=20)
-            resource_y += 20
+            if resource is not None:  # Check for None resources
+                resource_name = resource.title()
+                text = f"{resource_name}: {amount:.1f}"
+                color = (255, 100, 100) if amount < 100 else (255, 255, 255)
+                self.draw_text(screen, text, menu_rect.x + 10, resource_y, color, size=20)
+                resource_y += 20
         
         # Draw building options
         y = resource_y + 20

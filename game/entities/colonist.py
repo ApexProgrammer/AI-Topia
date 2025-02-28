@@ -217,45 +217,115 @@ class Colonist:
             if available_jobs:
                 # Filter jobs by skills and traits with resource production priority
                 suitable_jobs = []
+                
+                # Check colony inventory to prioritize needed resources
+                resource_priorities = {}
+                for resource_type, amount in self.world.colony_inventory.items():
+                    if resource_type is None:
+                        continue
+                    # Higher priority for lower amounts - prioritize resources in short supply
+                    priority = max(1, 500 / (amount + 1))
+                    resource_priorities[resource_type] = priority
+                
+                # Count existing job types to enforce distribution
+                existing_job_types = {}
+                for colonist in self.world.colonists:
+                    if colonist.job and hasattr(colonist.job, 'building'):
+                        job_type = colonist.job.building.building_type
+                        existing_job_types[job_type] = existing_job_types.get(job_type, 0) + 1
+                
+                # Find the least populated job type - prioritize these heavily
+                min_count = float('inf')
+                least_populated_job_types = set()
+                
+                # Check specifically for resource production buildings
+                for building_type in ['farm', 'woodcutter', 'quarry', 'mine']:
+                    count = existing_job_types.get(building_type, 0)
+                    if count < min_count:
+                        min_count = count
+                        least_populated_job_types = {building_type}
+                    elif count == min_count:
+                        least_populated_job_types.add(building_type)
+                
+                # Calculate diversity bonus - encourage different building types
+                diversity_bonus = {}
+                for building_type in ['farm', 'woodcutter', 'quarry', 'mine']:
+                    count = existing_job_types.get(building_type, 0)
+                    # Massive bonus for least populated types
+                    if building_type in least_populated_job_types:
+                        diversity_bonus[building_type] = 5.0  # Very large bonus for least populated
+                    else:
+                        # Higher bonus for less common building types
+                        diversity_bonus[building_type] = 3.0 / (count + 1)
+                
                 for job in available_jobs:
-                    score = 0
-                    # Base score from traits
-                    if job.type == 'farmer':
-                        score = self.traits['work_ethic'] * 1.2  # Priority for food production
-                    elif job.type == 'wood_gatherer':
-                        score = (self.traits['work_ethic'] + self.traits['intelligence']) / 2 * 1.1
-                    elif job.type == 'stone_gatherer':
-                        score = (self.traits['work_ethic'] + self.traits['intelligence']) / 2 * 1.1
-                    elif job.type == 'metal_gatherer':
-                        score = (self.traits['work_ethic'] + self.traits['intelligence']) / 2 * 1.1
-                    elif job.type == 'goods_worker':
-                        score = (self.traits['creativity'] + self.traits['intelligence']) / 2 * 1.15
-                    elif job.type == 'factory_worker':
-                        score = (self.traits['work_ethic'] + self.traits['intelligence']) / 2
-                    elif job.type == 'shopkeeper':
-                        score = (self.traits['sociability'] + self.traits['creativity']) / 2
-                    elif job.type == 'banker':
-                        score = self.traits['intelligence']
-                    elif job.type == 'government_worker':
-                        score = (self.traits['intelligence'] + self.traits['leadership']) / 2
+                    job_priority = 1.0
                     
-                    # Additional score based on colony needs
-                    if hasattr(job.building, 'produces'):
-                        resource = job.building.produces
-                        if resource in self.world.colony_inventory:
-                            current_amount = self.world.colony_inventory[resource]
-                            if current_amount < 100:  # Low resource threshold
-                                score *= 1.5  # Significant boost for needed resources
-                            elif current_amount < 200:  # Medium resource threshold
-                                score *= 1.2  # Moderate boost
+                    # Prioritize based on building type and resource production
+                    if hasattr(job, 'building') and hasattr(job.building, 'produces'):
+                        produced_resource = job.building.produces
+                        building_type = job.building.building_type
+                        
+                        # Apply resource priority
+                        if produced_resource in resource_priorities:
+                            job_priority *= resource_priorities[produced_resource]
+                        
+                        # Apply diversity bonus to encourage variety of buildings
+                        if building_type in diversity_bonus:
+                            job_priority *= diversity_bonus[building_type]
+                        
+                        # Extra bonus for non-farm buildings to counter farm bias
+                        if building_type != 'farm':
+                            job_priority *= 1.5
+                            
+                        # Extra bonus for least populated job types
+                        if building_type in least_populated_job_types:
+                            job_priority *= 3.0
                     
-                    if score > 40:  # Lowered threshold to ensure more job assignments
-                        suitable_jobs.append((job, score))
+                    # Consider colonist traits but with less weight to prioritize diversity
+                    trait_match = 1.0
+                    if hasattr(job, 'building'):
+                        building_type = job.building.building_type
+                        if building_type == 'farm':
+                            # Farmers value work ethic
+                            trait_match = 0.7 + (self.traits['work_ethic'] / 300)
+                        elif building_type in ['woodcutter', 'quarry', 'mine']:
+                            # Resource gatherers value ambition
+                            trait_match = 0.7 + (self.traits['ambition'] / 300)
+                        elif building_type == 'workshop':
+                            # Workshop workers value creativity
+                            trait_match = 0.7 + (self.traits['creativity'] / 300)
+                    
+                    # Final priority calculation - traits matter less than building distribution
+                    final_priority = job_priority * (trait_match * 0.5 + 0.5)  # Reduce trait influence
+                    suitable_jobs.append((final_priority, job))
                 
                 if suitable_jobs:
-                    # Choose job weighted by suitability score
-                    job, _ = max(suitable_jobs, key=lambda x: x[1])
-                    self.move_to_job(job)
+                    # Sort by priority, highest first
+                    suitable_jobs.sort(key=lambda x: x[0], reverse=True)
+                    
+                    # Choose job with some randomization to avoid all colonists picking the same job
+                    # Take top 3 jobs and pick randomly with weights according to priority
+                    top_jobs = suitable_jobs[:min(3, len(suitable_jobs))]
+                    priorities = [priority for priority, _ in top_jobs]
+                    total_priority = sum(priorities)
+                    
+                    if total_priority > 0:
+                        # Normalize priorities to probabilities
+                        probabilities = [p/total_priority for p in priorities]
+                        
+                        # Make random choice based on probabilities
+                        import random
+                        chosen_index = random.choices(range(len(top_jobs)), weights=probabilities, k=1)[0]
+                        _, chosen_job = top_jobs[chosen_index]
+                        
+                        if self.move_to_job(chosen_job):
+                            # Set a message to indicate which building type was chosen
+                            building_type = chosen_job.building.building_type if hasattr(chosen_job, 'building') else "unknown"
+                            self.current_task = f"working at {building_type}"
+                            return True
+        
+        return False
 
     def move_to_job(self, job):
         """Move to and take a job with improved pathfinding"""
@@ -664,7 +734,7 @@ class Colonist:
             self.random_movement()
 
     def gather_resources(self):
-        """Enhanced resource gathering with efficiency bonuses"""
+        """Enhanced resource gathering with building integration"""
         if not self.job:
             return
             
@@ -676,18 +746,20 @@ class Colonist:
             (self.traits['intelligence'] / 100) * 0.1    # Skill bonus
         )
         
-        # Enhanced job-specific trait bonuses
-        if hasattr(self.job, 'type'):
-            if self.job.type == 'farmer':
-                efficiency *= 1.2  # Increased farming efficiency
-            elif self.job.type == 'wood_gatherer':
-                efficiency *= 1.15
-            elif self.job.type == 'stone_gatherer':
-                efficiency *= 1.1
-            elif self.job.type == 'metal_gatherer':
-                efficiency *= 1.1
-            elif self.job.type == 'goods_worker':
-                efficiency *= 1.15
+        # Building-type specific bonuses to encourage variety
+        if hasattr(self.job, 'building'):
+            building_type = self.job.building.building_type
+            # Enhanced bonuses for non-farm buildings to counter farm bias
+            if building_type == 'woodcutter':
+                efficiency *= 1.25  # Significant boost for woodcutters
+            elif building_type == 'quarry':
+                efficiency *= 1.2   # Good boost for quarry
+            elif building_type == 'mine':
+                efficiency *= 1.25  # Significant boost for mines
+            elif building_type == 'workshop':
+                efficiency *= 1.3   # Best boost for workshops
+            elif building_type == 'farm':
+                efficiency *= 1.0   # No additional boost for farms
         
         # Enhanced proximity bonus for resource gathering
         if hasattr(self.job, 'building'):
@@ -695,40 +767,58 @@ class Colonist:
                        (self.y - self.job.building.y)**2)**0.5
             if distance < 50:  # Close to workplace
                 efficiency *= 1.3  # Increased proximity bonus
+                self.current_task = 'working'  # Set current task for visual indicator
             elif distance < 100:  # Medium distance
                 efficiency *= 1.1
+                self.current_task = 'working'
         
-        # Produce resources with calculated efficiency
-        if hasattr(self.job, 'produces'):
-            base_production = self.job.production_rate * efficiency
-            # Add experience bonus (0-20% extra)
-            if hasattr(self, 'work_experience'):
-                experience_bonus = min(0.2, self.work_experience / 500)
-                production = base_production * (1 + experience_bonus)
-            else:
-                production = base_production
+        # Update work experience regardless of distance
+        if not hasattr(self, 'work_experience'):
+            self.work_experience = 0
+        self.work_experience += 0.1
+        
+        # Energy cost of gathering - reduced for experienced workers
+        experience_bonus = min(0.2, self.work_experience / 500) if hasattr(self, 'work_experience') else 0
+        energy_cost = 0.1 * (1 - experience_bonus)
+        self.energy = max(0, self.energy - energy_cost)
+        
+        # Earn money for work with efficiency bonus
+        building_type = self.job.building.building_type if hasattr(self.job, 'building') else "unknown"
+        base_salary = JOB_SALARIES.get(building_type, MINIMUM_WAGE) 
+        earned = (base_salary / 30) * efficiency * (1 + experience_bonus)
+        self.money += earned
+        self.inventory['money'] = self.money
+        
+        # Small happiness boost from successful gathering
+        if random.random() < 0.15:  # 15% chance for happiness boost
+            self.happiness = min(100, self.happiness + 1)
+
+        # Directly trigger building production if close to workplace
+        if hasattr(self.job, 'building') and distance < 100:
+            # Boost building production when colonist is at work
+            building = self.job.building
+            if building.is_complete and hasattr(building, 'produces'):
+                # Ensure different building types get utilized
+                # Transfer building resources to colonist's personal inventory (small amount)
+                if building.produces not in self.inventory:
+                    self.inventory[building.produces] = 0
+                    
+                harvest_amount = efficiency * 0.2  # Small personal harvest
+                if building.inventory.get(building.produces, 0) >= harvest_amount:
+                    building.inventory[building.produces] -= harvest_amount
+                    self.inventory[building.produces] += harvest_amount
                 
-            # Add to world's shared inventory
-            self.world.add_to_colony_inventory(self.job.produces, production)
-            
-            # Energy cost of gathering - reduced for experienced workers
-            energy_cost = 0.1 * (1 - (experience_bonus if hasattr(self, 'work_experience') else 0))
-            self.energy = max(0, self.energy - energy_cost)
-            
-            # Small happiness boost from successful gathering
-            if random.random() < 0.15:  # Increased chance for happiness boost
-                self.happiness = min(100, self.happiness + 1)
-            
-            # Earn money for work with efficiency bonus
-            base_salary = JOB_SALARIES.get(self.job.type, MINIMUM_WAGE)
-            earned = (base_salary / 30) * efficiency * (1 + experience_bonus if hasattr(self, 'work_experience') else 1)
-            self.money += earned
-            self.inventory['money'] = self.money
-            
-            # Increment work experience
-            if not hasattr(self, 'work_experience'):
-                self.work_experience = 0
-            self.work_experience += 0.1
+                # Chance for exceptional work triggering bonus production
+                # Higher chance for non-farm buildings
+                bonus_chance = 0.05
+                if building.building_type != 'farm':
+                    bonus_chance = 0.08  # Higher chance for non-farms
+                
+                if random.random() < bonus_chance * efficiency:
+                    # Bonus production for the colony inventory
+                    produced = building.production_rate * 0.5
+                    if building.produces in self.world.colony_inventory:
+                        self.world.colony_inventory[building.produces] += produced
 
     def visit_nearest_shop(self):
         """Find and move to the nearest shop with pathfinding"""

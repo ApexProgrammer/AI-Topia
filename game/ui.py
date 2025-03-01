@@ -50,7 +50,7 @@ class Button:
         # Draw hover effect with reduced intensity
         if self.hovered:
             s = pygame.Surface((self.rect.width, self.rect.height))
-            s.set_alpha(15)  # Reduced from 30 to 15 for more subtle effect
+            s.set_alpha(15)  # Reduced from  to 15 for more subtle effect
             s.fill((255, 255, 255))
             screen.blit(s, self.rect, special_flags=pygame.BLEND_ADD)
 
@@ -81,12 +81,7 @@ class UI:
         button_spacing = 15
         button_y = 10
         self.buttons = {
-            'policies': Button(10, button_y, button_width, 30, 'Policies', COLORS['button']),
-            'election': Button(10 + (button_width + button_spacing), button_y, button_width, 30, 'Elections', COLORS['button']),
-            'taxes': Button(10 + 2 * (button_width + button_spacing), button_y, button_width, 30, 'Taxes', COLORS['button']),
-            'laws': Button(10 + 3 * (button_width + button_spacing), button_y, button_width, 30, 'Laws', COLORS['button']),
-            'scenario': Button(10 + 4 * (button_width + button_spacing), button_y, button_width, 30, 'Scenario', COLORS['button']),
-            'build': Button(10 + 5 * (button_width + button_spacing), button_y, button_width, 30, 'Build', COLORS['button'])
+            'build': Button(10, button_y, button_width, 30, 'Build', COLORS['button'])
         }
         
         # Policy and law settings
@@ -121,11 +116,49 @@ class UI:
             'retirement_age': 65
         }
         
+        # Job Directives
+        self.job_directives = {
+            'agriculture': 0.5,
+            'manufacturing': 0.5,
+            'education': 0.5,
+            'healthcare': 0.5,
+            'commerce': 0.5,
+            'research': 0.5
+        }
+        
+        # Resource Priorities
+        self.resource_priorities = {
+            'food': 'normal',
+            'wood': 'normal',
+            'stone': 'normal',
+            'metal': 'normal',
+            'tools': 'normal',
+            'medicine': 'normal'
+        }
+        
+        # Labor Policies
+        self.labor_policies = {
+            'working_hours': 8,  # hours per day
+            'safety_standards': 0.5,  # 0-1 scale
+            'training_investment': 0.3,  # 0-1 scale
+            'specialization': 0.5,  # 0-1 balance between specialist and generalist
+            'child_education': True,
+            'retirement_age': 65
+        }
+        
+        # Job Override System
+        self.critical_positions = set()  # Set of (x,y) tuples for critical position overrides
+        self.manual_assignments = {}  # Dict of colonist: (x,y) assignments
+        
         # UI states
         self.policy_menu_open = False
         self.law_menu_open = False
         self.show_colonist_info = False
         self.show_election_info = False
+        self.directive_menu_open = False
+        self.show_job_fair = False
+        self.job_fair_candidates = []
+        self.selected_priority_resource = None
         
         # Key state tracking
         self.keys_pressed = {
@@ -148,17 +181,19 @@ class UI:
         self.update_timer = 0
         self.UPDATE_INTERVAL = 30  # Update suggestions every 30 frames
 
-<<<<<<< HEAD
-        self.selected_building = None  # Add this line
-        self.show_building_info = False  # Add this line
-=======
+        self.selected_building = None
+        self.show_building_info = False
         self.show_setup_instructions = True
         
         # Message display state
         self.message = None
         self.message_timer = 0
         self.MESSAGE_DURATION = 120  # Show messages for 2 seconds (60 fps * 2)
->>>>>>> d5c1d8459634c8e67032028b0c4089ac46492b8f
+
+        # Visual Feedback
+        self.show_efficiency_overlay = False
+        self.show_satisfaction_overlay = False
+        self.labor_alerts = []
 
     def handle_event(self, event):
         """Main event handler for all UI interactions"""
@@ -191,22 +226,7 @@ class UI:
             
             # Handle building info on right click only
             elif event.button == 3:  # Right click
-                # Clear any previous selection first
-                self.selected_building = None
-                self.show_building_info = False
-                
-                # Check for building clicks
-                for building in self.world.buildings:
-                    building_rect = pygame.Rect(
-                        (building.x + self.camera_x) * self.zoom - (building.base_size * self.zoom) / 2,
-                        (building.y + self.camera_y) * self.zoom - (building.base_size * self.zoom) / 2,
-                        building.base_size * self.zoom,
-                        building.base_size * self.zoom
-                    )
-                    if building_rect.collidepoint(mouse_pos):
-                        self.selected_building = building
-                        self.show_building_info = True
-                        break
+                self.handle_building_click(mouse_pos, right_click=True)
 
         elif event.type == pygame.MOUSEMOTION:
             # Update button hover states
@@ -232,35 +252,24 @@ class UI:
                 self.selected_building_type = None
                 self.tooltip_text = None
 
-<<<<<<< HEAD
+            # Toggle overlays with hotkeys
+            if event.key == pygame.K_e:  # 'E' for efficiency
+                self.show_efficiency_overlay = not self.show_efficiency_overlay
+            elif event.key == pygame.K_s:  # 'S' for satisfaction
+                self.show_satisfaction_overlay = not self.show_satisfaction_overlay
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:  # Left click
+            # Show setup instructions until initial buildings are complete
+            if not self.world.initial_setup_complete:
+                if not self.show_building_menu:
+                    self.show_message("Open the Build menu to place required buildings")
+                    self.show_setup_instructions = True
+
     def handle_button_clicks(self, mouse_pos):
         """Handle UI button clicks and return True if a button was clicked"""
         for button_type, button in self.buttons.items():
             if button.rect.collidepoint(mouse_pos):
-                if button_type == 'policies':
-                    self.policy_menu_open = not self.policy_menu_open
-                    self.law_menu_open = False
-                    self.show_election_info = False
-                    self.show_building_menu = False
-                elif button_type == 'election':
-                    self.show_election_info = not self.show_election_info
-                    self.policy_menu_open = False
-                    self.law_menu_open = False
-                    self.show_building_menu = False
-                elif button_type == 'taxes':
-                    self.policy_menu_open = True
-                    self.law_menu_open = False
-                    self.show_election_info = False
-                    self.show_building_menu = False
-                elif button_type == 'laws':
-                    self.law_menu_open = not self.law_menu_open
-                    self.policy_menu_open = False
-                    self.show_election_info = False
-                    self.show_building_menu = False
-                elif button_type == 'scenario':
-                    if not self.world.scenario_manager.active_scenario:
-                        self.world.scenario_manager.trigger_scenario()
-                elif button_type == 'build':
+                if button_type == 'build':
                     self.show_building_menu = not self.show_building_menu
                     if not self.show_building_menu:
                         self.selected_building_type = None
@@ -269,14 +278,38 @@ class UI:
                         self.world.update_building_zones()
                 return True
         return False
-=======
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:  # Left click
-            # Show setup instructions until initial buildings are complete
-            if not self.world.initial_setup_complete:
-                if not self.show_building_menu:
-                    self.show_message("Open the Build menu to place required buildings")
-                    self.show_setup_instructions = True
->>>>>>> d5c1d8459634c8e67032028b0c4089ac46492b8f
+
+    def handle_building_click(self, mouse_pos, right_click=False):
+        """Handle building selection and interaction"""
+        # Convert screen coordinates to world coordinates
+        world_pos = self.screen_to_world(mouse_pos)
+        clicked_building = None
+        
+        # Check for building clicks
+        for building in self.world.buildings:
+            building_rect = pygame.Rect(
+                (building.x + self.camera_x) * self.zoom,
+                (building.y + self.camera_y) * self.zoom,
+                building.base_size * self.zoom,
+                building.base_size * self.zoom
+            )
+            if building_rect.collidepoint(mouse_pos):
+                clicked_building = building
+                break
+                
+        if clicked_building:
+            if right_click:
+                # Toggle critical position flag
+                if (clicked_building.x, clicked_building.y) in self.critical_positions:
+                    self.critical_positions.remove((clicked_building.x, clicked_building.y))
+                    self.show_message(f"Removed critical position flag from {clicked_building.building_type}")
+                else:
+                    self.critical_positions.add((clicked_building.x, clicked_building.y))
+                    self.show_message(f"Marked {clicked_building.building_type} as critical position")
+            else:
+                # Select building and show info
+                self.selected_building = clicked_building
+                self.show_building_info = True
 
     def handle_policy_click(self, mouse_pos):
         """Enhanced policy interaction handling"""
@@ -362,9 +395,6 @@ class UI:
                     self.tooltip_text = self.generate_building_suggestion()
         
         # Update button states
-        self.buttons['policies'].active = self.policy_menu_open
-        self.buttons['election'].active = self.show_election_info
-        self.buttons['laws'].active = self.law_menu_open
         self.buttons['build'].active = self.show_building_menu
 
         # Update message timer
@@ -391,7 +421,7 @@ class UI:
 
         # Stats panel
         stats_panel_x = 10
-        stats_panel_y = self.buttons['policies'].rect.bottom + 20
+        stats_panel_y = self.buttons['build'].rect.bottom + 20
         stats_panel_width = 280
         stats_spacing = 25
 
@@ -462,108 +492,36 @@ class UI:
         pygame.draw.rect(self.screen, COLORS['border'], score_bg, 1)
         self.screen.blit(score_surface, (score_x, score_y))
 
-<<<<<<< HEAD
         # Draw building info if selected
         if self.show_building_info and self.selected_building:
             self._render_building_info(self.screen)
-=======
+
         # Show initial setup instructions and preview
         if not self.world.initial_setup_complete and self.show_setup_instructions:
-            # Calculate position to show setup info on the right side
-            setup_panel_width = 300
-            
-            # Adjust x position when build menu is open to avoid overlap
-            if self.show_building_menu:
-                setup_panel_x = self.screen.get_width() - setup_panel_width - 270  # Move left of build menu
-            else:
-                setup_panel_x = self.screen.get_width() - setup_panel_width - 10
-                
-            setup_panel_y = score_y + score_bg.height + 20  # Position below score display
-            
-            setup_status = self.world.get_initial_setup_status()
-            
-            # Create instruction list with balanced resource emphasis
-            instructions = [
-                "Initial Colony Setup",
-                "---------------",
-                "Click Build Menu and place:",
-                "- Farm (Food production)",
-                "- Woodcutter (Wood production) ✓",
-                "- Quarry (Stone production) ✓",
-                "- Mine (Metal production) ✓",
-                "",
-            ]
-            
-            # Wrap status text to fit panel width
-            status_lines = []
-            words = setup_status.split()
-            current_line = "Status: "
-            for word in words:
-                test_line = current_line + word + " "
-                if self.font.size(test_line)[0] < setup_panel_width - 40:  # Leave margin
-                    current_line = test_line
-                else:
-                    status_lines.append(current_line)
-                    current_line = "        " + word + " "  # Indent continuation lines
-            status_lines.append(current_line)  # Add final line
-            
-            # Add wrapped status lines to instructions
-            instructions.extend(status_lines)
-            
-            # Calculate panel height based on text
-            line_height = 25
-            panel_height = (len(instructions) + 1) * line_height + 20
-            
-            # Draw semi-transparent panel background
-            s = pygame.Surface((setup_panel_width, panel_height))
-            s.set_alpha(180)  # More transparent
-            s.fill(COLORS['panel'])
-            self.screen.blit(s, (setup_panel_x, setup_panel_y))
-            pygame.draw.rect(self.screen, COLORS['border'], (setup_panel_x, setup_panel_y, setup_panel_width, panel_height), 1)
-            
-            # Draw panel title with higher opacity
-            title = self.font.render("Colony Setup", True, COLORS['text_header'])
-            self.screen.blit(title, (setup_panel_x + 10, setup_panel_y + 5))
-            
-            # Draw instructions
-            y = setup_panel_y + 30
-            for line in instructions:
-                if "Don't focus only on" in line:
-                    color = COLORS['warning']  # Highlight warning
-                elif "All resources" in line:
-                    color = COLORS['accent']  # Highlight important info
-                elif line.startswith("Status:"):
-                    color = COLORS['text_header']
-                else:
-                    color = COLORS['text']
-                self.draw_text(self.screen, line, setup_panel_x + 10, y, color)
-                y += line_height
+            self._render_setup_instructions()
 
         # Draw message if active
         if self.message and self.message_timer > 0:
-            # Create message surface with padding
-            padding = 10
-            message_surface = self.font.render(self.message, True, COLORS['text'])
-            bg_rect = pygame.Rect(
-                (self.screen.get_width() - message_surface.get_width()) // 2 - padding,
-                100 - padding,  # Position near top of screen
-                message_surface.get_width() + padding * 2,
-                message_surface.get_height() + padding * 2
-            )
+            self._render_message()
+
+        # Add directives menu rendering
+        if self.directive_menu_open:
+            self.draw_directives_menu(self.screen.get_width() - 360, 50)
+
+        # Add job fair and critical position rendering
+        if self.show_job_fair:
+            self.draw_job_fair(self.screen.get_width() - 420, 50)
             
-            # Draw semi-transparent background
-            s = pygame.Surface((bg_rect.width, bg_rect.height))
-            s.set_alpha(230)
-            s.fill(COLORS['panel'])
-            self.screen.blit(s, bg_rect)
-            pygame.draw.rect(self.screen, COLORS['border'], bg_rect, 1)
+        # Draw critical position overlays
+        self.draw_critical_positions(self.screen)
+
+        # Draw efficiency overlay if enabled
+        if self.show_efficiency_overlay:
+            self.draw_efficiency_overlay(self.screen)
             
-            # Draw message text
-            self.screen.blit(message_surface, (
-                (self.screen.get_width() - message_surface.get_width()) // 2,
-                100
-            ))
->>>>>>> d5c1d8459634c8e67032028b0c4089ac46492b8f
+        # Draw satisfaction overlay if enabled
+        if self.show_satisfaction_overlay:
+            self.draw_satisfaction_overlay(self.screen)
 
     def _draw_panel(self, x, y, width, height, title=None):
         """Draw a modern styled panel with optional title"""
@@ -600,7 +558,7 @@ class UI:
             # Ensure resource is not None before calling title()
             resource_name = resource if resource is None else resource.title()
             text = f"{resource_name}: {amount:.1f}"
-            color = COLORS['error'] if amount < 100 else COLORS['text']
+            color = COLORS['text'] if amount >= 100 else COLORS['error']  # Fix color logic
             self.draw_text(screen, text, x + padding, current_y, color)
             current_y += resource_spacing
 
@@ -615,7 +573,8 @@ class UI:
                  'success' if stats['happiness'] >= 70 else 'warning')
             ]
             for text, status in needs_text:
-                self.draw_text(screen, text, x + padding, current_y, COLORS[status])
+                color = COLORS[status]
+                self.draw_text(screen, text, x + padding, current_y, color)
                 current_y += resource_spacing
 
     def draw_colonist_info(self, x, y):
@@ -1084,7 +1043,6 @@ class UI:
         total_happiness = sum(colonist.happiness for colonist in self.world.colonists)
         return total_happiness / len(self.world.colonists)
 
-<<<<<<< HEAD
     def _render_building_info(self, screen):
         """Render detailed building information panel"""
         building = self.selected_building
@@ -1131,9 +1089,431 @@ class UI:
         # Draw info lines
         for i, line in enumerate(info_lines):
             self.draw_text(screen, line, panel_x + padding, panel_y + padding + i * line_height, COLORS['text'])
-=======
+
+    def _render_setup_instructions(self):
+        """Render setup instructions panel"""
+        setup_panel_width = 300
+        setup_panel_x = self.screen.get_width() - setup_panel_width - (270 if self.show_building_menu else 10)
+        setup_panel_y = 100  # Position below score display
+        
+        setup_status = self.world.get_initial_setup_status()
+        
+        # Create instruction list
+        instructions = [
+            "Initial Colony Setup",
+            "---------------",
+            "Click Build Menu and place:",
+            "- Farm (Food production)",
+            "- Woodcutter (Wood production) ✓",
+            "- Quarry (Stone production) ✓",
+            "- Mine (Metal production) ✓",
+            "",
+        ]
+        
+        # Wrap status text
+        status_lines = []
+        words = setup_status.split()
+        current_line = "Status: "
+        for word in words:
+            test_line = current_line + word + " "
+            if self.font.size(test_line)[0] < setup_panel_width - 40:
+                current_line = test_line
+            else:
+                status_lines.append(current_line)
+                current_line = "        " + word + " "
+        status_lines.append(current_line)
+        
+        instructions.extend(status_lines)
+        
+        # Calculate panel dimensions
+        line_height = 25
+        panel_height = (len(instructions) + 1) * line_height + 20
+        
+        # Draw panel
+        s = pygame.Surface((setup_panel_width, panel_height))
+        s.set_alpha(180)
+        s.fill(COLORS['panel'])
+        self.screen.blit(s, (setup_panel_x, setup_panel_y))
+        pygame.draw.rect(self.screen, COLORS['border'], (setup_panel_x, setup_panel_y, setup_panel_width, panel_height), 1)
+        
+        # Draw content
+        title = self.font.render("Colony Setup", True, COLORS['text_header'])
+        self.screen.blit(title, (setup_panel_x + 10, setup_panel_y + 5))
+        
+        y = setup_panel_y + 30
+        for line in instructions:
+            color = COLORS['warning'] if "Don't focus only on" in line else \
+                    COLORS['accent'] if "All resources" in line else \
+                    COLORS['text_header'] if line.startswith("Status:") else \
+                    COLORS['text']
+            self.draw_text(self.screen, line, setup_panel_x + 10, y, color)
+            y += line_height
+
+    def _render_message(self):
+        """Render message overlay"""
+        padding = 10
+        message_surface = self.font.render(self.message, True, COLORS['text'])
+        bg_rect = pygame.Rect(
+            (self.screen.get_width() - message_surface.get_width()) // 2 - padding,
+            100 - padding,
+            message_surface.get_width() + padding * 2,
+            message_surface.get_height() + padding * 2
+        )
+        
+        s = pygame.Surface((bg_rect.width, bg_rect.height))
+        s.set_alpha(230)
+        s.fill(COLORS['panel'])
+        self.screen.blit(s, bg_rect)
+        pygame.draw.rect(self.screen, COLORS['border'], bg_rect, 1)
+        
+        self.screen.blit(message_surface, (
+            (self.screen.get_width() - message_surface.get_width()) // 2,
+            100
+        ))
+
     def show_message(self, msg):
         """Display a message to the user"""
         self.message = msg
         self.message_timer = self.MESSAGE_DURATION
->>>>>>> d5c1d8459634c8e67032028b0c4089ac46492b8f
+
+    def draw_directives_menu(self, x, y):
+        """Draw the directives menu with industry focus and resource priority settings"""
+        menu_width = 350
+        padding = 15
+        item_height = 60
+        
+        # Calculate total height needed
+        total_items = len(self.job_directives) + len(self.resource_priorities) + 2  # +2 for section headers
+        height = total_items * item_height + padding * 2
+        
+        # Draw background
+        self._draw_panel(x, y, menu_width, height, "Colony Directives")
+        
+        current_y = y + padding + 30
+        
+        # Draw industry focus section
+        self.draw_text(self.screen, "Industry Focus", x + padding, current_y, COLORS['text_header'])
+        current_y += 30
+        
+        for industry, value in self.job_directives.items():
+            name = industry.replace('_', ' ').title()
+            self.draw_text(self.screen, name, x + padding, current_y, COLORS['text'])
+            self.draw_slider(x + padding, current_y + 25, menu_width - padding * 3, 20, value, 
+                           {'min': 0, 'max': 1, 'step': 0.1, 'format': '{:.0%}'})
+            current_y += item_height
+        
+        # Draw resource priority section
+        current_y += 20
+        self.draw_text(self.screen, "Resource Priorities", x + padding, current_y, COLORS['text_header'])
+        current_y += 30
+        
+        for resource, priority in self.resource_priorities.items():
+            name = resource.replace('_', ' ').title()
+            self.draw_text(self.screen, name, x + padding, current_y, COLORS['text'])
+            
+            # Draw priority buttons
+            button_width = 80
+            button_spacing = 10
+            priority_options = ['low', 'normal', 'critical']
+            
+            for i, option in enumerate(priority_options):
+                button_x = x + padding + i * (button_width + button_spacing)
+                button_rect = pygame.Rect(button_x, current_y + 25, button_width, 25)
+                
+                # Determine button color based on selection
+                if priority == option:
+                    color = COLORS['accent']
+                else:
+                    color = COLORS['button']
+                
+                pygame.draw.rect(self.screen, color, button_rect, border_radius=4)
+                pygame.draw.rect(self.screen, COLORS['border'], button_rect, 1, border_radius=4)
+                
+                # Draw button text
+                text = self.font.render(option.title(), True, COLORS['text'])
+                text_rect = text.get_rect(center=button_rect.center)
+                self.screen.blit(text, text_rect)
+                
+                # Handle click
+                if button_rect.collidepoint(pygame.mouse.get_pos()) and pygame.mouse.get_pressed()[0]:
+                    self.resource_priorities[resource] = option
+            
+            current_y += item_height
+
+    def handle_directives_click(self, mouse_pos):
+        """Handle clicks in the directives menu"""
+        if self.directive_menu_open:
+            menu_x = self.screen.get_width() - 360
+            menu_y = 50
+            
+            # Check for slider interactions
+            y = menu_y + 75  # Start after title and first section header
+            
+            # Handle industry focus sliders
+            for industry in self.job_directives:
+                slider_rect = pygame.Rect(menu_x + 15, y + 25, 290, 20)
+                if slider_rect.collidepoint(mouse_pos):
+                    ratio = (mouse_pos[0] - (menu_x + 15)) / 290
+                    self.job_directives[industry] = max(0.0, min(1.0, ratio))
+                y += 60
+            
+            # Skip to resource priority section
+            y += 50
+            
+            # Handle resource priority buttons
+            for resource in self.resource_priorities:
+                for i, priority in enumerate(['low', 'normal', 'critical']):
+                    button_rect = pygame.Rect(menu_x + 15 + i * 90, y + 25, 80, 25)
+                    if button_rect.collidepoint(mouse_pos):
+                        self.resource_priorities[resource] = priority
+                y += 60
+
+    def draw_job_fair(self, x, y):
+        """Draw the job fair interface for new colonist career guidance"""
+        if not self.show_job_fair or not self.job_fair_candidates:
+            return
+            
+        menu_width = 400
+        padding = 15
+        item_height = 120
+        
+        # Calculate height based on candidates
+        height = (len(self.job_fair_candidates) * item_height) + padding * 3 + 40  # Extra for header
+        
+        # Draw background
+        self._draw_panel(x, y, menu_width, height, "Colony Job Fair")
+        
+        current_y = y + padding + 30
+        
+        for colonist in self.job_fair_candidates:
+            # Draw colonist info box
+            box_rect = pygame.Rect(x + padding, current_y, menu_width - padding * 2, item_height - 10)
+            pygame.draw.rect(self.screen, COLORS['panel_highlight'], box_rect, border_radius=4)
+            pygame.draw.rect(self.screen, COLORS['border'], box_rect, 1, border_radius=4)
+            
+            # Draw colonist details
+            name_y = current_y + 10
+            self.draw_text(self.screen, f"Colonist {colonist.id}", x + padding * 2, name_y, COLORS['text_header'])
+            
+            # Draw traits that influence job suitability
+            traits_y = name_y + 25
+            traits = [
+                f"Work Ethic: {colonist.traits['work_ethic']}%",
+                f"Intelligence: {colonist.traits['intelligence']}%",
+                f"Creativity: {colonist.traits['creativity']}%"
+            ]
+            for i, trait in enumerate(traits):
+                self.draw_text(self.screen, trait, x + padding * 2, traits_y + i * 20, COLORS['text_secondary'])
+            
+            # Draw job recommendation buttons
+            button_y = traits_y + 25
+            recommended_jobs = self.get_recommended_jobs(colonist)
+            button_width = 100
+            for i, (job, score) in enumerate(recommended_jobs):
+                button_rect = pygame.Rect(
+                    x + padding * 2 + i * (button_width + 10),
+                    button_y,
+                    button_width,
+                    25
+                )
+                
+                # Color based on recommendation strength
+                color = COLORS['success'] if score > 0.7 else COLORS['warning'] if score > 0.4 else COLORS['button']
+                
+                pygame.draw.rect(self.screen, color, button_rect, border_radius=4)
+                pygame.draw.rect(self.screen, COLORS['border'], button_rect, 1, border_radius=4)
+                
+                # Draw job name
+                text = self.font.render(job.title(), True, COLORS['text'])
+                text_rect = text.get_rect(center=button_rect.center)
+                self.screen.blit(text, text_rect)
+                
+                if button_rect.collidepoint(pygame.mouse.get_pos()):
+                    self.tooltip_text = f"Match Score: {score:.0%}"
+                    if pygame.mouse.get_pressed()[0]:
+                        self.assign_job_preference(colonist, job)
+            
+            current_y += item_height
+
+    def draw_critical_positions(self, screen):
+        """Draw overlay for buildings with critical position flags"""
+        for position in self.critical_positions:
+            # Find building at this position
+            building = next((b for b in self.world.buildings if (b.x, b.y) == position), None)
+            if building:
+                # Convert building position to screen coordinates
+                screen_x = int((building.x + self.camera_x) * self.zoom)
+                screen_y = int((building.y + self.camera_y) * self.zoom)
+                
+                # Draw highlight
+                size = int(building.base_size * self.zoom)
+                s = pygame.Surface((size, size))
+                s.set_alpha(128)
+                s.fill((255, 100, 100))  # Red highlight for critical positions
+                screen.blit(s, (screen_x, screen_y))
+                
+                # Draw icon
+                icon_size = min(24, size // 2)
+                pygame.draw.polygon(screen, COLORS['error'],
+                    [
+                        (screen_x + size//2, screen_y + icon_size//2),
+                        (screen_x + size//2 - icon_size//2, screen_y + icon_size),
+                        (screen_x + size//2 + icon_size//2, screen_y + icon_size)
+                    ]
+                )
+
+    def get_recommended_jobs(self, colonist):
+        """Calculate job recommendations based on colonist traits and colony needs"""
+        recommendations = []
+        
+        # Define job requirements and weights
+        job_profiles = {
+            'farmer': {
+                'work_ethic': 0.6,
+                'intelligence': 0.2,
+                'creativity': 0.2
+            },
+            'miner': {
+                'work_ethic': 0.7,
+                'intelligence': 0.2,
+                'creativity': 0.1
+            },
+            'teacher': {
+                'intelligence': 0.6,
+                'creativity': 0.3,
+                'work_ethic': 0.1
+            },
+            'researcher': {
+                'intelligence': 0.7,
+                'creativity': 0.2,
+                'work_ethic': 0.1
+            },
+            'merchant': {
+                'creativity': 0.5,
+                'intelligence': 0.3,
+                'work_ethic': 0.2
+            }
+        }
+        
+        # Calculate match scores
+        for job, requirements in job_profiles.items():
+            score = 0
+            for trait, weight in requirements.items():
+                trait_value = colonist.traits.get(trait, 0) / 100  # Convert to 0-1 scale
+                score += trait_value * weight
+                
+            # Adjust score based on colony needs
+            if self.job_directives.get(job, 0) > 0.7:  # High priority industry
+                score *= 1.2
+            elif self.job_directives.get(job, 0) < 0.3:  # Low priority industry
+                score *= 0.8
+                
+            recommendations.append((job, score))
+        
+        # Sort by score and return top 3
+        recommendations.sort(key=lambda x: x[1], reverse=True)
+        return recommendations[:3]
+
+    def assign_job_preference(self, colonist, job_type):
+        """Set a colonist's job preference and update the UI"""
+        colonist.job_preference = job_type
+        self.job_fair_candidates.remove(colonist)
+        
+        # Check for critical positions that match the job type
+        for building in self.world.buildings:
+            if ((building.x, building.y) in self.critical_positions and 
+                building.building_type == job_type and
+                building.is_complete):
+                # Find an empty job slot
+                for job in building.jobs:
+                    if not job.employee:
+                        job.employee = colonist
+                        colonist.job = job
+                        self.manual_assignments[colonist.id] = (building.x, building.y)
+                        self.show_message(f"Assigned to critical {job_type} position")
+                        return
+        
+        self.show_message(f"Set job preference: {job_type.title()}")
+        
+        # If no more candidates, close the job fair
+        if not self.job_fair_candidates:
+            self.show_job_fair = False
+
+    def draw_efficiency_overlay(self, screen):
+        """Draw building efficiency overlay with visual indicators"""
+        for building in self.world.buildings:
+            if not hasattr(building, 'jobs'):
+                continue
+                
+            # Calculate efficiency
+            filled_jobs = len([j for j in building.jobs if j.employee])
+            efficiency = filled_jobs / building.max_jobs if building.max_jobs else 0
+            
+            # Convert building position to screen coordinates
+            screen_x = int((building.x + self.camera_x) * self.zoom)
+            screen_y = int((building.y + self.camera_y) * self.zoom)
+            size = int(building.base_size * self.zoom)
+            
+            # Create efficiency indicator
+            s = pygame.Surface((size, size))
+            s.set_alpha(160)
+            
+            # Color based on efficiency
+            if efficiency >= 0.8:
+                color = (100, 255, 100)  # Green for high efficiency
+            elif efficiency >= 0.5:
+                color = (255, 255, 100)  # Yellow for medium efficiency
+            else:
+                color = (255, 100, 100)  # Red for low efficiency
+                
+            s.fill(color)
+            screen.blit(s, (screen_x, screen_y))
+            
+            # Draw efficiency percentage
+            text = self.font.render(f"{int(efficiency * 100)}%", True, (0, 0, 0))
+            text_rect = text.get_rect(center=(screen_x + size//2, screen_y + size//2))
+            screen.blit(text, text_rect)
+
+    def draw_satisfaction_overlay(self, screen):
+        """Draw worker satisfaction overlay"""
+        for building in self.world.buildings:
+            if not hasattr(building, 'jobs'):
+                continue
+                
+            # Calculate average satisfaction
+            workers = [j.employee for j in building.jobs if j.employee]
+            if not workers:
+                continue
+                
+            avg_satisfaction = sum(w.job_satisfaction for w in workers) / len(workers)
+            
+            # Convert building position to screen coordinates
+            screen_x = int((building.x + self.camera_x) * self.zoom)
+            screen_y = int((building.y + self.camera_y) * self.zoom)
+            size = int(building.base_size * self.zoom)
+            
+            # Create satisfaction indicator
+            s = pygame.Surface((size, 5))  # Thin bar at top of building
+            s.set_alpha(200)
+            
+            # Color based on satisfaction
+            if avg_satisfaction >= 0.8:
+                color = (100, 255, 100)
+            elif avg_satisfaction >= 0.5:
+                color = (255, 255, 100)
+            else:
+                color = (255, 100, 100)
+                
+            s.fill(color)
+            screen.blit(s, (screen_x, screen_y))
+            
+            # Draw small icon if satisfaction is critically low
+            if avg_satisfaction < 0.3:
+                icon_size = min(16, size // 3)
+                pygame.draw.polygon(screen, COLORS['error'],
+                    [
+                        (screen_x + size - icon_size, screen_y),
+                        (screen_x + size, screen_y),
+                        (screen_x + size, screen_y + icon_size)
+                    ]
+                )

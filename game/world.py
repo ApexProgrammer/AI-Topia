@@ -612,12 +612,16 @@ class World:
                 happiness_factor = (colonist.happiness + colonist.spouse.happiness) / 200
                 economic_factor = min(1.0, (colonist.money + colonist.spouse.money) / 5000)
                 
-                policy_factor = 1.0
-                if self.ui and self.ui.policies['birth_incentive'] > 0:
-                    policy_factor += self.ui.policies['birth_incentive'] / 1000
-                
-                # Multiply base chance by a factor scaling with population size
-                birth_chance = (0.01 * health_factor * happiness_factor * economic_factor * policy_factor) * (1 + len(self.colonists) / 100)
+                # Increase birth chance significantly if there is sufficient food and housing
+                if self.colony_inventory['food'] > len(self.colonists) and len(self.get_available_homes()) > 0:
+                    birth_chance = 0.9  # High chance of reproduction
+                else:
+                    policy_factor = 1.0
+                    if self.ui and self.ui.policies['birth_incentive'] > 0:
+                        policy_factor += self.ui.policies['birth_incentive'] / 1000
+                    
+                    # Multiply base chance by a factor scaling with population size
+                    birth_chance = (0.01 * health_factor * happiness_factor * economic_factor * policy_factor) * (1 + len(self.colonists) / 100)
                 
                 if random.random() < birth_chance:
                     # Create new colonist
@@ -653,6 +657,24 @@ class World:
                         colonist.inventory['money'] = colonist.money
                     grid_x, grid_y = self.get_grid_position(x, y)
                     self.add_to_grid(child, grid_x, grid_y)
+
+        # Check if population reaches 80% of housing capacity
+        total_housing_capacity = sum(home.max_occupants for home in self.homes)
+        if len(self.colonists) >= 0.8 * total_housing_capacity:
+            if self.ui:
+                self.ui.show_message("Population nearing housing capacity. Consider expanding.")
+
+        # Check if grid exceeds 70% filled
+        total_tiles = self.current_size * self.current_size
+        occupied_tiles = len(self.grid_occupation)
+        if occupied_tiles >= 0.7 * total_tiles:
+            self.expand_map()
+            if self.ui:
+                self.ui.show_message("Map expanded due to high occupancy.")
+
+        # Gradually increase expansion costs
+        global EXPANSION_COST
+        EXPANSION_COST += 100
 
     def handle_deaths(self):
         """Handle colonist deaths"""

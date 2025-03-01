@@ -6,10 +6,35 @@ from ..config import (COLONIST_SPEED, WORKING_AGE, RETIREMENT_AGE,
                      REPRODUCTION_AGE_MIN, REPRODUCTION_AGE_MAX, 
                      BUILDING_TYPES, TILE_SIZE, MOVEMENT_SPEED,
                      MARRIAGE_CHANCE, ANIMATION_SPEED, WALK_FRAMES, 
-                     RESOURCE_CONSUMPTION_RATE, JOB_SALARIES, MINIMUM_WAGE)
+                     RESOURCE_CONSUMPTION_RATE, JOB_SALARIES, MINIMUM_WAGE,
+                     REPRODUCTION_BASE_CHANCE, FAMILY_REPRODUCTION_BONUS,
+                     REPRODUCTION_COOLDOWN, CRITICAL_POSITION_BONUS,
+                     CRITICAL_POSITION_WAGE_BONUS, SKILL_GAIN_RATE,
+                     EDUCATION_SKILL_BONUS)
 from .building import Building
 
 class Colonist:
+    # Demographic tracking - keep track of age groups for population visualization
+    AGE_GROUPS = {
+        "child": (0, 18),
+        "young_adult": (18, 30),
+        "adult": (30, 50),
+        "middle_aged": (50, 65),
+        "senior": (65, 100)
+    }
+    
+    # Satisfaction thresholds for visual indicators
+    SATISFACTION_LEVELS = {
+        "very_low": 0.2,
+        "low": 0.4,
+        "medium": 0.6,
+        "high": 0.8,
+        "very_high": 1.0
+    }
+    
+    # Optimization - cached property to avoid recalculating
+    PERFORMANCE_UPDATE_INTERVAL = 5  # Only update non-critical attributes every X frames
+    
     def __init__(self, x, y, world):
         self.x = x
         self.y = y
@@ -23,6 +48,20 @@ class Colonist:
         self.energy = 100
         self.money = 1000
         self.happiness = 100
+        self.job_satisfaction = 1.0  # Added job satisfaction tracking
+        
+        # Family and reproduction tracking
+        self.reproduction_cooldown = 0
+        self.is_critical_position = False  # Flag for critical position
+        self.education_level = random.randint(1, 5)  # Education level (1-5)
+        self.skills = {
+            'farming': random.randint(20, 50),
+            'mining': random.randint(20, 50),
+            'crafting': random.randint(20, 50),
+            'construction': random.randint(20, 50),
+            'education': random.randint(20, 50),
+            'leadership': random.randint(20, 50),
+        }
         
         # Visualization
         self.color = (255, 200, 200) if self.gender == 'F' else (200, 200, 255)
@@ -91,13 +130,35 @@ class Colonist:
         self.current_path = []  # Store path to target
         self.path_index = 0     # Current position in path
         self.last_target = None # Remember last valid target
+        
+        # Performance optimization
+        self.update_counter = 0  # Counter for less frequent updates
+        self.cached_age_group = self.get_age_group()  # Cache age group
+        
+        # Enhanced worker satisfaction tracking
+        self.satisfaction_history = [1.0] * 10  # Track satisfaction over time
+        self.satisfaction_factors = {  # Detailed breakdown of satisfaction factors
+            'pay': 1.0,
+            'environment': 1.0,
+            'job_match': 1.0,
+            'social': 1.0,
+            'workload': 1.0
+        }
+        
+        # Accessibility options
+        self.high_contrast_enabled = False  # Default to standard mode
+        self.text_scale = 1.0  # Default text scale
 
     def update(self, speed_multiplier=1.0):
         # Store previous position for interpolation
         self.prev_pos = (self.x, self.y)
         
-        # Update relationships
-        self.update_relationships()
+        # Performance optimization - count frames for less frequent updates
+        self.update_counter = (self.update_counter + 1) % self.PERFORMANCE_UPDATE_INTERVAL
+        
+        # Critical updates every frame
+        if self.reproduction_cooldown > 0:
+            self.reproduction_cooldown -= 0.01 * speed_multiplier
         
         # Get AI decision focused on gathering and social needs
         state = self.get_state()
@@ -122,9 +183,41 @@ class Colonist:
                 self.animation_timer = 0
                 self.animation_frame = (self.animation_frame + 1) % WALK_FRAMES
         
+        # Less frequent updates for performance optimization
+        if self.update_counter == 0:
+            # Update relationships and check age group changes
+            self.update_relationships()
+            
+            # Check for reproduction with family house bonus
+            if self.check_reproduction_conditions():
+                self.attempt_reproduction()
+            
+            # Update skills through work experience
+            if self.job:
+                self.improve_skills()
+            
+            # Update demographic data when age group changes
+            old_age_group = self.cached_age_group
+            new_age_group = self.get_age_group()
+            if old_age_group != new_age_group:
+                self.cached_age_group = new_age_group
+                if hasattr(self.world, 'update_demographics'):
+                    self.world.update_demographics(old_age_group, new_age_group)
+                    
+            # Update detailed satisfaction metrics
+            self.update_detailed_satisfaction()
+        
+        # Always update basic needs and happiness each frame
         self.update_basic_needs(speed_multiplier)
         self.update_happiness()
         self.age += 0.0005 * speed_multiplier
+        
+    def get_age_group(self):
+        """Get the demographic age group for this colonist"""
+        for group, (min_age, max_age) in self.AGE_GROUPS.items():
+            if min_age <= self.age < max_age:
+                return group
+        return "senior"  # Default to senior for anyone over the top age
 
     def update_basic_needs(self, speed_multiplier=1.0):
         """Update basic needs like energy, health, and resources"""
@@ -199,7 +292,8 @@ class Colonist:
             
         # Economic factors
         if self.job:
-            self.happiness += 0.1
+            self.update_job_satisfaction()  # Update job satisfaction
+            self.happiness += 0.1 * self.job_satisfaction  # Job satisfaction affects happiness
         if self.home:
             self.happiness += 0.2
         if self.money > 1000:
@@ -209,120 +303,191 @@ class Colonist:
             
         # Cap happiness
         self.happiness = max(0, min(100, self.happiness))
+        
+        # Update satisfaction history
+        self.satisfaction_history.append(self.job_satisfaction)
+        if len(self.satisfaction_history) > 10:  # Keep last 10 values
+            self.satisfaction_history.pop(0)
+
+    def update_detailed_satisfaction(self):
+        """Update detailed satisfaction factors for visualization"""
+        if not self.job:
+            # Reset all factors for unemployed colonists
+            for factor in self.satisfaction_factors:
+                self.satisfaction_factors[factor] = 0.0
+            return
+            
+        # Pay satisfaction
+        base_salary = JOB_SALARIES.get(self.job.type, MINIMUM_WAGE)
+        actual_salary = getattr(self.job, 'salary', base_salary)
+        self.satisfaction_factors['pay'] = min(1.0, actual_salary / (base_salary * 1.5))
+        
+        # Environment satisfaction - workspace efficiency and conditions
+        if hasattr(self.job, 'building'):
+            building = self.job.building
+            # Calculate worker density and facility quality
+            total_workers = len([j for j in building.jobs if j.employee])
+            ideal_workers = building.max_jobs
+            
+            if ideal_workers > 0:
+                # Balance between understaffed/overstaffed
+                worker_ratio = total_workers / ideal_workers
+                if worker_ratio <= 1.0:
+                    # Understaffed - more work per person
+                    self.satisfaction_factors['workload'] = min(1.0, 0.5 + worker_ratio * 0.5)
+                else:
+                    # Overstaffed - less work per person
+                    self.satisfaction_factors['workload'] = max(0.2, 1.5 - worker_ratio * 0.5)
+                    
+            # Environmental factors based on building type
+            if building.happiness_bonus > 0:
+                self.satisfaction_factors['environment'] = min(1.0, 0.5 + (building.happiness_bonus / 20))
+            else:
+                self.satisfaction_factors['environment'] = 0.5
+        else:
+            self.satisfaction_factors['environment'] = 0.5
+            self.satisfaction_factors['workload'] = 0.5
+            
+        # Job match based on skills and traits
+        if hasattr(self.job, 'building'):
+            building_type = self.job.building.building_type
+            match_skill = None
+            match_trait = None
+            
+            if building_type == 'farm':
+                match_skill = 'farming'
+                match_trait = 'work_ethic'
+            elif building_type in ['woodcutter', 'quarry', 'mine']:
+                match_skill = 'mining'
+                match_trait = 'ambition'
+            elif building_type == 'workshop':
+                match_skill = 'crafting'
+                match_trait = 'creativity'
+            elif building_type in ['teacher', 'university']:
+                match_skill = 'education'
+                match_trait = 'intelligence'
+            elif building_type in ['government']:
+                match_skill = 'leadership'
+                match_trait = 'leadership'
+                
+            if match_skill and match_trait:
+                skill_level = self.skills.get(match_skill, 0) / 100
+                trait_level = self.traits.get(match_trait, 0) / 100
+                self.satisfaction_factors['job_match'] = (skill_level * 0.6) + (trait_level * 0.4)
+            else:
+                self.satisfaction_factors['job_match'] = 0.5
+        else:
+            self.satisfaction_factors['job_match'] = 0.5
+            
+        # Social satisfaction based on coworkers
+        if hasattr(self.job, 'building') and hasattr(self.job.building, 'jobs'):
+            coworkers = [j.employee for j in self.job.building.jobs if j.employee and j.employee != self]
+            
+            # Check relationships with coworkers
+            if coworkers:
+                relationship_sum = 0
+                for coworker in coworkers:
+                    if coworker in self.relationships:
+                        relationship_sum += max(-1, min(1, self.relationships[coworker] / 100))
+                    else:
+                        relationship_sum += 0  # Neutral relationship
+                
+                avg_relationship = relationship_sum / len(coworkers) if coworkers else 0
+                self.satisfaction_factors['social'] = (avg_relationship + 1) / 2  # Convert -1,1 to 0,1
+            else:
+                self.satisfaction_factors['social'] = 0.5  # Neutral if no coworkers
+        else:
+            self.satisfaction_factors['social'] = 0.5
+
+    def update_job_satisfaction(self):
+        """Calculate job satisfaction based on various factors"""
+        if not self.job:
+            self.job_satisfaction = 0.0
+            return
+
+        # Base satisfaction from pay
+        base_salary = JOB_SALARIES.get(self.job.type, MINIMUM_WAGE)
+        pay_satisfaction = min(1.0, self.job.salary / base_salary)
+
+        # Trait match satisfaction
+        trait_match = 1.0
+        if hasattr(self.job, 'building'):
+            building_type = self.job.building.building_type
+            if building_type == 'farm':
+                trait_match = 0.5 + (self.traits['work_ethic'] / 200)
+            elif building_type in ['woodcutter', 'quarry', 'mine']:
+                trait_match = 0.5 + (self.traits['ambition'] / 200)
+            elif building_type == 'workshop':
+                trait_match = 0.5 + (self.traits['creativity'] / 200)
+            elif building_type in ['teacher', 'government']:
+                trait_match = 0.5 + (self.traits['intelligence'] / 200)
+
+        # Workplace conditions
+        workplace_satisfaction = 1.0
+        if hasattr(self.job, 'building'):
+            # Check building efficiency
+            building = self.job.building
+            workers = len([j for j in building.jobs if j.employee])
+            if building.max_jobs > 0:
+                workplace_satisfaction = 0.5 + (workers / building.max_jobs) * 0.5
+
+        # Calculate final satisfaction
+        self.job_satisfaction = (pay_satisfaction * 0.4 + 
+                               trait_match * 0.4 + 
+                               workplace_satisfaction * 0.2)
+        
+        # Cap satisfaction
+        self.job_satisfaction = max(0.0, min(1.0, self.job_satisfaction))
+        
+    def get_satisfaction_level(self):
+        """Return the satisfaction level category for visualization"""
+        for level, threshold in sorted(self.SATISFACTION_LEVELS.items(), key=lambda x: x[1]):
+            if self.job_satisfaction <= threshold:
+                return level
+        return "very_high"  # Default if all thresholds passed
+
+    def get_satisfaction_color(self):
+        """Get color for satisfaction visualization"""
+        level = self.get_satisfaction_level()
+        if level == "very_low":
+            return (255, 0, 0)  # Red
+        elif level == "low":
+            return (255, 128, 0)  # Orange
+        elif level == "medium":
+            return (255, 255, 0)  # Yellow
+        elif level == "high":
+            return (128, 255, 0)  # Light green
+        else:  # very_high
+            return (0, 255, 0)  # Green
 
     def seek_job(self):
-        """Find and move to an available job with enhanced resource production priority"""
+        """Find and move to an available job with simplified logic"""
         if not self.job and WORKING_AGE <= self.age <= RETIREMENT_AGE:
-            available_jobs = self.world.get_available_jobs()
-            if available_jobs:
-                # Filter jobs by skills and traits with resource production priority
-                suitable_jobs = []
+            # Get all buildings that can have jobs
+            work_buildings = [b for b in self.world.buildings 
+                            if b.max_jobs > 0 and len([j for j in b.jobs if not j.employee]) > 0]
+            
+            if work_buildings:
+                # Find closest building with open jobs
+                closest_building = None
+                min_distance = float('inf')
                 
-                # Check colony inventory to prioritize needed resources
-                resource_priorities = {}
-                for resource_type, amount in self.world.colony_inventory.items():
-                    if resource_type is None:
-                        continue
-                    # Higher priority for lower amounts - prioritize resources in short supply
-                    priority = max(1, 500 / (amount + 1))
-                    resource_priorities[resource_type] = priority
+                for building in work_buildings:
+                    dist = ((self.x - building.x)**2 + (self.y - building.y)**2)**0.5
+                    if dist < min_distance:
+                        min_distance = dist
+                        closest_building = building
                 
-                # Count existing job types to enforce distribution
-                existing_job_types = {}
-                for colonist in self.world.colonists:
-                    if colonist.job and hasattr(colonist.job, 'building'):
-                        job_type = colonist.job.building.building_type
-                        existing_job_types[job_type] = existing_job_types.get(job_type, 0) + 1
-                
-                # Find the least populated job type - prioritize these heavily
-                min_count = float('inf')
-                least_populated_job_types = set()
-                
-                # Check specifically for resource production buildings
-                for building_type in ['farm', 'woodcutter', 'quarry', 'mine']:
-                    count = existing_job_types.get(building_type, 0)
-                    if count < min_count:
-                        min_count = count
-                        least_populated_job_types = {building_type}
-                    elif count == min_count:
-                        least_populated_job_types.add(building_type)
-                
-                # Calculate diversity bonus - encourage different building types
-                diversity_bonus = {}
-                for building_type in ['farm', 'woodcutter', 'quarry', 'mine']:
-                    count = existing_job_types.get(building_type, 0)
-                    # Massive bonus for least populated types
-                    if building_type in least_populated_job_types:
-                        diversity_bonus[building_type] = 5.0  # Very large bonus for least populated
-                    else:
-                        # Higher bonus for less common building types
-                        diversity_bonus[building_type] = 3.0 / (count + 1)
-                
-                for job in available_jobs:
-                    job_priority = 1.0
-                    
-                    # Prioritize based on building type and resource production
-                    if hasattr(job, 'building') and hasattr(job.building, 'produces'):
-                        produced_resource = job.building.produces
-                        building_type = job.building.building_type
-                        
-                        # Apply resource priority
-                        if produced_resource in resource_priorities:
-                            job_priority *= resource_priorities[produced_resource]
-                        
-                        # Apply diversity bonus to encourage variety of buildings
-                        if building_type in diversity_bonus:
-                            job_priority *= diversity_bonus[building_type]
-                        
-                        # Extra bonus for non-farm buildings to counter farm bias
-                        if building_type != 'farm':
-                            job_priority *= 1.5
-                            
-                        # Extra bonus for least populated job types
-                        if building_type in least_populated_job_types:
-                            job_priority *= 3.0
-                    
-                    # Consider colonist traits but with less weight to prioritize diversity
-                    trait_match = 1.0
-                    if hasattr(job, 'building'):
-                        building_type = job.building.building_type
-                        if building_type == 'farm':
-                            # Farmers value work ethic
-                            trait_match = 0.7 + (self.traits['work_ethic'] / 300)
-                        elif building_type in ['woodcutter', 'quarry', 'mine']:
-                            # Resource gatherers value ambition
-                            trait_match = 0.7 + (self.traits['ambition'] / 300)
-                        elif building_type == 'workshop':
-                            # Workshop workers value creativity
-                            trait_match = 0.7 + (self.traits['creativity'] / 300)
-                    
-                    # Final priority calculation - traits matter less than building distribution
-                    final_priority = job_priority * (trait_match * 0.5 + 0.5)  # Reduce trait influence
-                    suitable_jobs.append((final_priority, job))
-                
-                if suitable_jobs:
-                    # Sort by priority, highest first
-                    suitable_jobs.sort(key=lambda x: x[0], reverse=True)
-                    
-                    # Choose job with some randomization to avoid all colonists picking the same job
-                    # Take top 3 jobs and pick randomly with weights according to priority
-                    top_jobs = suitable_jobs[:min(3, len(suitable_jobs))]
-                    priorities = [priority for priority, _ in top_jobs]
-                    total_priority = sum(priorities)
-                    
-                    if total_priority > 0:
-                        # Normalize priorities to probabilities
-                        probabilities = [p/total_priority for p in priorities]
-                        
-                        # Make random choice based on probabilities
-                        import random
-                        chosen_index = random.choices(range(len(top_jobs)), weights=probabilities, k=1)[0]
-                        _, chosen_job = top_jobs[chosen_index]
-                        
-                        if self.move_to_job(chosen_job):
-                            # Set a message to indicate which building type was chosen
-                            building_type = chosen_job.building.building_type if hasattr(chosen_job, 'building') else "unknown"
-                            self.current_task = f"working at {building_type}"
+                if closest_building:
+                    # Take the first available job
+                    for job in closest_building.jobs:
+                        if not job.employee:
+                            self.job = job
+                            job.employee = self
+                            # Set current task to working
+                            self.current_task = f"working at {closest_building.building_type}"
+                            # Move to job location
+                            self.target_position = (closest_building.x, closest_building.y)
                             return True
         
         return False
@@ -359,6 +524,11 @@ class Colonist:
             self.target_position = best_pos
             self.job = job
             job.employee = self
+            
+            # Check if this is a critical position job
+            if hasattr(job, 'is_critical') and job.is_critical:
+                self.is_critical_position = True
+            
             self.happiness += 10
             return True
             
@@ -564,15 +734,53 @@ class Colonist:
                         break
 
     def render(self, screen, camera_x=0, camera_y=0, zoom=1.0):
-        """Render colonist with walking animation"""
+        """Render colonist with walking animation and status indicators"""
         # Calculate screen position
         screen_x = int((self.x + camera_x) * zoom)
         screen_y = int((self.y + camera_y) * zoom)
         size = int(10 * zoom)  # Base size
         
-        # Draw body
-        color = (255, 200, 200) if self.gender == 'F' else (200, 200, 255)
-        pygame.draw.circle(screen, color, (screen_x, screen_y), size)
+        # Use high contrast colors if accessibility option is enabled
+        if self.high_contrast_enabled:
+            body_color = (255, 255, 100) if self.gender == 'F' else (100, 100, 255)
+        else:
+            body_color = (255, 200, 200) if self.gender == 'F' else (200, 200, 255)
+        
+        # Critical position highlights
+        if self.is_critical_position:
+            # Draw halo for critical position workers
+            pygame.draw.circle(screen, (255, 215, 0), (screen_x, screen_y), size + 2)
+        
+        # Draw job satisfaction indicator under colonist if employed
+        if self.job:
+            satisfaction_color = self.get_satisfaction_color()
+            indicator_size = max(2, int(3 * zoom))
+            pygame.draw.circle(screen, satisfaction_color, 
+                             (screen_x, screen_y + size + indicator_size), 
+                             indicator_size)
+        
+        # Draw age group indicators for demographic visualization
+        age_group = self.get_age_group()
+        age_indicator_y = screen_y - size - 5 * zoom
+        
+        if age_group == "child":
+            age_color = (102, 255, 255)  # Light blue for children
+        elif age_group == "young_adult":
+            age_color = (0, 204, 102)    # Green for young adults
+        elif age_group == "adult":
+            age_color = (51, 102, 255)   # Blue for adults
+        elif age_group == "middle_aged":
+            age_color = (153, 153, 255)  # Purple for middle-aged
+        else:  # senior
+            age_color = (204, 204, 204)  # Gray for seniors
+            
+        # Draw small age indicator above colonist
+        pygame.draw.circle(screen, age_color, 
+                         (screen_x, int(age_indicator_y)), 
+                         max(1, int(2 * zoom)))
+        
+        # Draw main body
+        pygame.draw.circle(screen, body_color, (screen_x, screen_y), size)
         
         # Enhanced walking animation with consistent leg length across all directions
         if self.is_walking:
@@ -590,54 +798,67 @@ class Colonist:
             if self.direction == 'right':
                 # Right movement - legs swing forward/back
                 leg_y = base_y + leg_length
-                pygame.draw.line(screen, color,
+                pygame.draw.line(screen, body_color,
                                (base_left, base_y),
                                (base_left - step_offset, leg_y),
                                max(1, int(2 * zoom)))
-                pygame.draw.line(screen, color,
+                pygame.draw.line(screen, body_color,
                                (base_right, base_y),
                                (base_right + step_offset, leg_y),
                                max(1, int(2 * zoom)))
             elif self.direction == 'left':
                 # Left movement - legs swing forward/back (mirrored)
                 leg_y = base_y + leg_length
-                pygame.draw.line(screen, color,
+                pygame.draw.line(screen, body_color,
                                (base_left, base_y),
                                (base_left + step_offset, leg_y),
                                max(1, int(2 * zoom)))
-                pygame.draw.line(screen, color,
+                pygame.draw.line(screen, body_color,
                                (base_right, base_y),
                                (base_right - step_offset, leg_y),
                                max(1, int(2 * zoom)))
             elif self.direction == 'up':
                 # Up movement - legs move side to side
-                pygame.draw.line(screen, color,
+                pygame.draw.line(screen, body_color,
                                (base_left - step_offset, base_y),
                                (base_left - step_offset, base_y + leg_length),
                                max(1, int(2 * zoom)))
-                pygame.draw.line(screen, color,
+                pygame.draw.line(screen, body_color,
                                (base_right + step_offset, base_y),
                                (base_right + step_offset, base_y + leg_length),
                                max(1, int(2 * zoom)))
             else:  # down
                 # Down movement - legs move side to side
-                pygame.draw.line(screen, color,
+                pygame.draw.line(screen, body_color,
                                (base_left + step_offset, base_y),
                                (base_left + step_offset, base_y + leg_length),
                                max(1, int(2 * zoom)))
-                pygame.draw.line(screen, color,
+                pygame.draw.line(screen, body_color,
                                (base_right - step_offset, base_y),
                                (base_right - step_offset, base_y + leg_length),
                                max(1, int(2 * zoom)))
         
         # Draw current activity indicator
         if self.current_task:
-            indicator_color = {
-                'working': (255, 255, 0),
-                'building': (255, 128, 0),
-                'shopping': (0, 255, 255),
-                'socializing': (255, 192, 203)
-            }.get(self.current_task, (255, 255, 255))
+            # Use high contrast colors for accessibility if enabled
+            if self.high_contrast_enabled:
+                indicator_colors = {
+                    'working': (255, 255, 0),      # Bright yellow
+                    'building': (255, 100, 0),     # Bright orange
+                    'shopping': (0, 255, 255),     # Bright cyan
+                    'socializing': (255, 100, 255), # Bright pink
+                    'studying': (100, 100, 255),    # Bright blue
+                }
+            else:
+                indicator_colors = {
+                    'working': (255, 255, 0),
+                    'building': (255, 128, 0),
+                    'shopping': (0, 255, 255),
+                    'socializing': (255, 192, 203),
+                    'studying': (100, 100, 255),
+                }
+            
+            indicator_color = indicator_colors.get(self.current_task, (255, 255, 255))
             pygame.draw.circle(screen, indicator_color,
                              (screen_x, screen_y - size - 3 * zoom),
                              max(2, int(3 * zoom)))
@@ -648,6 +869,13 @@ class Colonist:
             pygame.draw.circle(screen, (255, 0, 0),
                              (screen_x, screen_y - size - 8 * zoom),
                              max(2, int(3 * zoom)))
+            
+        # Draw education level indicator (small dots)
+        if self.education_level > 1:
+            for i in range(int(self.education_level)):
+                pygame.draw.circle(screen, (100, 100, 255),
+                                 (screen_x - size + i*4*zoom, screen_y - size - 12*zoom),
+                                 max(1, int(1.5 * zoom)))
 
     def get_state(self):
         """Get current state for AI input"""
@@ -711,7 +939,7 @@ class Colonist:
         return base_compatibility + random.randint(-20, 20)
 
     def execute_action(self, action):
-        """Execute the action chosen by the AI - removed building decisions"""
+        """Execute the action chosen by the AI - with new education action"""
         if action == 0:  # Find job/gather resources
             if not self.job and WORKING_AGE <= self.age <= RETIREMENT_AGE:
                 self.seek_job()
@@ -732,6 +960,9 @@ class Colonist:
             self.visit_nearest_shop()
         elif action == 6:  # Random movement
             self.random_movement()
+        elif action == 7:  # Education - new action
+            self.current_task = "studying"
+            self.attend_education()
 
     def gather_resources(self):
         """Enhanced resource gathering with building integration"""
@@ -745,6 +976,20 @@ class Colonist:
             (self.happiness / 100) * 0.2 +               # Happiness bonus
             (self.traits['intelligence'] / 100) * 0.1    # Skill bonus
         )
+        
+        # Apply skill bonus based on job type
+        if hasattr(self.job, 'building'):
+            building_type = self.job.building.building_type
+            if building_type == 'farm':
+                efficiency *= (1 + self.skills['farming'] / 200)  # Up to 50% boost
+            elif building_type in ['woodcutter', 'quarry', 'mine']:
+                efficiency *= (1 + self.skills['mining'] / 200)
+            elif building_type == 'workshop':
+                efficiency *= (1 + self.skills['crafting'] / 200)
+        
+        # Critical position bonus
+        if self.is_critical_position:
+            efficiency *= (1 + CRITICAL_POSITION_BONUS)
         
         # Building-type specific bonuses to encourage variety
         if hasattr(self.job, 'building'):
@@ -772,20 +1017,14 @@ class Colonist:
                 efficiency *= 1.1
                 self.current_task = 'working'
         
-        # Update work experience regardless of distance
-        if not hasattr(self, 'work_experience'):
-            self.work_experience = 0
-        self.work_experience += 0.1
-        
-        # Energy cost of gathering - reduced for experienced workers
-        experience_bonus = min(0.2, self.work_experience / 500) if hasattr(self, 'work_experience') else 0
-        energy_cost = 0.1 * (1 - experience_bonus)
-        self.energy = max(0, self.energy - energy_cost)
-        
         # Earn money for work with efficiency bonus
         building_type = self.job.building.building_type if hasattr(self.job, 'building') else "unknown"
         base_salary = JOB_SALARIES.get(building_type, MINIMUM_WAGE) 
-        earned = (base_salary / 30) * efficiency * (1 + experience_bonus)
+        
+        # Apply critical position wage bonus
+        wage_multiplier = CRITICAL_POSITION_WAGE_BONUS if self.is_critical_position else 1.0
+        
+        earned = (base_salary / 30) * efficiency * wage_multiplier
         self.money += earned
         self.inventory['money'] = self.money
         
@@ -798,27 +1037,208 @@ class Colonist:
             # Boost building production when colonist is at work
             building = self.job.building
             if building.is_complete and hasattr(building, 'produces'):
-                # Ensure different building types get utilized
+                # Process resource chain dependencies if applicable
+                if hasattr(building, 'inputs') and building.inputs:
+                    self.process_resource_chain(building)
+                
                 # Transfer building resources to colonist's personal inventory (small amount)
-                if building.produces not in self.inventory:
-                    self.inventory[building.produces] = 0
+                if building.produces and building.inventory.get(building.produces, 0) > 0:
+                    if building.produces not in self.inventory:
+                        self.inventory[building.produces] = 0
                     
-                harvest_amount = efficiency * 0.2  # Small personal harvest
-                if building.inventory.get(building.produces, 0) >= harvest_amount:
-                    building.inventory[building.produces] -= harvest_amount
-                    self.inventory[building.produces] += harvest_amount
+                    harvest_amount = efficiency * 0.2  # Small personal harvest
+                    if building.inventory.get(building.produces, 0) >= harvest_amount:
+                        building.inventory[building.produces] -= harvest_amount
+                        self.inventory[building.produces] += harvest_amount
+                    
+                    # Bonus production chance
+                    bonus_chance = 0.05
+                    if building.building_type != 'farm':
+                        bonus_chance = 0.08
+                    
+                    if random.random() < bonus_chance * efficiency:
+                        produced = building.production_rate * 0.5
+                        if building.produces in self.world.colony_inventory:
+                            self.world.colony_inventory[building.produces] += produced
+
+    # New methods for family, skills, and resource chains
+    def check_reproduction_conditions(self):
+        """Check if reproduction is possible"""
+        if not self.spouse:
+            return False
+            
+        if self.reproduction_cooldown > 0:
+            return False
+            
+        # Check age requirements
+        if (REPRODUCTION_AGE_MIN <= self.age <= REPRODUCTION_AGE_MAX and
+            REPRODUCTION_AGE_MIN <= self.spouse.age <= REPRODUCTION_AGE_MAX):
                 
-                # Chance for exceptional work triggering bonus production
-                # Higher chance for non-farm buildings
-                bonus_chance = 0.05
-                if building.building_type != 'farm':
-                    bonus_chance = 0.08  # Higher chance for non-farms
+            # Calculate base chance
+            chance = REPRODUCTION_BASE_CHANCE
+            
+            # Apply family house bonus if applicable
+            if self.home and self.home.building_type == 'family_house':
+                if hasattr(self.home, 'reproduction_bonus'):
+                    chance += self.home.reproduction_bonus
+                else:
+                    chance += FAMILY_REPRODUCTION_BONUS  # Default bonus
+            
+            # Adjust based on colony health
+            if len(self.world.colonists) > 50:  # Large colony
+                chance *= 0.8  # Reduce chance in large colonies
                 
-                if random.random() < bonus_chance * efficiency:
-                    # Bonus production for the colony inventory
-                    produced = building.production_rate * 0.5
-                    if building.produces in self.world.colony_inventory:
-                        self.world.colony_inventory[building.produces] += produced
+            # Roll for reproduction
+            return random.random() < chance
+        
+        return False
+
+    def attempt_reproduction(self):
+        """Create a new colonist through reproduction"""
+        if not self.spouse or not self.world:
+            return
+            
+        # Create new colonist near the parents
+        x, y = self.x, self.y
+        child = Colonist(x, y, self.world)
+        
+        # Genetics - inherit traits from parents
+        for trait in child.traits:
+            # 50% chance to inherit from each parent
+            parent = self if random.random() < 0.5 else self.spouse
+            
+            # Add some genetic variation
+            variation = random.randint(-10, 10)
+            child.traits[trait] = max(20, min(100, parent.traits[trait] + variation))
+        
+        # Set child's age to 0
+        child.age = 0
+        
+        # Add to parents' children lists
+        self.children.append(child)
+        self.spouse.children.append(child)
+        
+        # Add to world
+        self.world.colonists.append(child)
+        
+        # Set reproduction cooldown
+        self.reproduction_cooldown = REPRODUCTION_COOLDOWN
+        self.spouse.reproduction_cooldown = REPRODUCTION_COOLDOWN
+        
+        # Happiness boost for new parents
+        self.happiness = min(100, self.happiness + 15)
+        self.spouse.happiness = min(100, self.spouse.happiness + 15)
+
+    def improve_skills(self):
+        """Improve skills through work experience"""
+        if not self.job or not hasattr(self.job, 'building'):
+            return
+            
+        building_type = self.job.building.building_type
+        
+        # Determine which skill to improve
+        skill_to_improve = None
+        if building_type == 'farm':
+            skill_to_improve = 'farming'
+        elif building_type in ['woodcutter', 'quarry', 'mine']:
+            skill_to_improve = 'mining'
+        elif building_type == 'workshop':
+            skill_to_improve = 'crafting'
+        elif building_type == 'government':
+            skill_to_improve = 'leadership'
+        
+        # Improve the relevant skill
+        if skill_to_improve and skill_to_improve in self.skills:
+            # Base skill improvement
+            improvement = SKILL_GAIN_RATE
+            
+            # Education bonus
+            improvement *= (1 + (self.education_level - 1) * 0.2)  # 0-80% bonus based on education
+            
+            # Intelligence bonus
+            improvement *= (1 + (self.traits['intelligence'] - 50) / 100)
+            
+            # Apply improvement
+            self.skills[skill_to_improve] = min(100, self.skills[skill_to_improve] + improvement)
+
+    def process_resource_chain(self, building):
+        """Process resource chain dependencies for production"""
+        if not hasattr(building, 'inputs') or not building.inputs:
+            return
+            
+        # Check if required input resources are available
+        can_produce = True
+        consumption_amount = {}
+        
+        for input_resource, amount_needed in building.inputs.items():
+            # Check colony inventory
+            available = self.world.colony_inventory.get(input_resource, 0)
+            if available < amount_needed:
+                can_produce = False
+                break
+                
+            consumption_amount[input_resource] = min(amount_needed, available)
+        
+        if can_produce:
+            # Consume input resources
+            for resource, amount in consumption_amount.items():
+                self.world.colony_inventory[resource] -= amount
+            
+            # Apply production bonus for resource chains
+            bonus_production = building.production_rate * 0.5
+            
+            # Add to building inventory
+            if building.produces not in building.inventory:
+                building.inventory[building.produces] = 0
+            building.inventory[building.produces] += bonus_production
+            
+            # Log processing
+            if hasattr(self.world, 'debug_log'):
+                self.world.debug_log(f"Resource chain processed: {consumption_amount} → {bonus_production} {building.produces}")
+
+    def attend_education(self):
+        """Attend education to improve skills and education level"""
+        # Find education building
+        education_buildings = [b for b in self.world.buildings 
+                             if b.building_type in ['school', 'university', 'library']]
+        
+        if not education_buildings:
+            return False
+        
+        # Find closest education building
+        closest = None
+        min_dist = float('inf')
+        
+        for building in education_buildings:
+            dist = ((self.x - building.x)**2 + (self.y - building.y)**2)**0.5
+            if dist < min_dist:
+                min_dist = dist
+                closest = building
+        
+        if not closest:
+            return False
+        
+        # Move towards education building
+        self.target_position = (closest.x, closest.y)
+        
+        # If close enough, gain education benefits
+        if min_dist < 50:
+            # Improve education level slowly
+            if random.random() < 0.05:  # 5% chance per update
+                self.education_level = min(5, self.education_level + 0.1)
+            
+            # Improve a random skill
+            skill_keys = list(self.skills.keys())
+            skill_to_improve = random.choice(skill_keys)
+            self.skills[skill_to_improve] = min(100, 
+                                              self.skills[skill_to_improve] + EDUCATION_SKILL_BONUS)
+            
+            # Happiness boost from learning
+            self.happiness = min(100, self.happiness + 0.2)
+            
+            return True
+        
+        return False
 
     def visit_nearest_shop(self):
         """Find and move to the nearest shop with pathfinding"""
@@ -956,3 +1376,12 @@ class Colonist:
                     open_set.add(neighbor)
         
         return []  # No path found
+        
+    # Accessibility methods
+    def toggle_high_contrast(self):
+        """Toggle high contrast mode for accessibility"""
+        self.high_contrast_enabled = not self.high_contrast_enabled
+        
+    def set_text_scale(self, scale):
+        """Set text size scaling for improved readability"""
+        self.text_scale = max(0.8, min(1.5, scale))

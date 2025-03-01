@@ -4,7 +4,8 @@ from ..config import (BUILDING_TYPES, TILE_SIZE, RESOURCES,
                      SUPPLY_DEMAND_IMPACT, INTEREST_RATE,
                      PRICE_VOLATILITY, MARKET_UPDATE_RATE, PRICE_MEMORY,
                      JOB_SALARIES, MINIMUM_WAGE, BASE_STORAGE_CAPACITY,
-                     INVENTORY_UPDATE_RATE, HAPPINESS_RADIUS, WORK_RADIUS)
+                     INVENTORY_UPDATE_RATE, HAPPINESS_RADIUS, WORK_RADIUS,
+                     BUILDING_TIERS, CRITICAL_POSITION_BONUS)
 
 class Job:
     def __init__(self, building):
@@ -13,6 +14,7 @@ class Job:
         self.employee = None
         self.x = building.x
         self.y = building.y
+        self.is_critical = False  # Flag for critical positions
         
         # Set salary based on job type
         if self.building_type == 'farm':
@@ -30,12 +32,29 @@ class Job:
         elif self.building_type == 'government':
             self.type = 'government_worker'
             self.salary = JOB_SALARIES['government_worker']
+        elif self.building_type == 'woodcutter':
+            self.type = 'wood_gatherer'
+            self.salary = JOB_SALARIES['wood_gatherer']
+        elif self.building_type == 'quarry':
+            self.type = 'stone_gatherer'
+            self.salary = JOB_SALARIES['stone_gatherer']
+        elif self.building_type == 'mine':
+            self.type = 'metal_gatherer'
+            self.salary = JOB_SALARIES['metal_gatherer']
+        elif self.building_type == 'workshop':
+            self.type = 'goods_worker'
+            self.salary = JOB_SALARIES['goods_worker']
         else:
             self.type = 'worker'
             self.salary = MINIMUM_WAGE
 
 class Building:
+    _next_id = 1  # Class variable for generating unique IDs
+    
     def __init__(self, building_type, x, y, world):
+        self.id = Building._next_id  # Assign unique ID
+        Building._next_id += 1  # Increment for next building
+        
         self.building_type = building_type
         self.x = x
         self.y = y
@@ -50,16 +69,35 @@ class Building:
         self.happiness_bonus = building_config.get('happiness_bonus', 0)
         self.produces = building_config.get('produces', None)
         self.production_rate = building_config.get('production_rate', 0)
+        self.tier = building_config.get('tier', 1)  # Building tier level
         
+        # Initialize inventory for production buildings immediately
+        self.inventory = {}
+        if self.produces:
+            self.inventory[self.produces] = 0
+            # Initialize in colony inventory if not exists
+            if self.produces not in self.world.colony_inventory:
+                self.world.colony_inventory[self.produces] = 0
+
         # Storage capacity
         self.storage_multiplier = building_config.get('storage_multiplier', 1.0)
         self.max_storage = BASE_STORAGE_CAPACITY * self.storage_multiplier
+        
+        # Resource chain dependencies - new!
+        self.inputs = building_config.get('inputs', {})
+        
+        # Family housing reproduction bonus - new!
+        self.reproduction_bonus = building_config.get('reproduction_bonus', 0)
+        
+        # Critical position tracking
+        self.has_critical_positions = False
         
         # Building state
         self.construction_progress = 0
         self.is_complete = False
         self.current_occupants = 0
         self.jobs = []
+        self.efficiency = 1.0  # Building efficiency tracker
         
         # Initialize inventory and prices
         self.inventory = {}
@@ -71,7 +109,12 @@ class Building:
         if building_type == 'house':
             self.max_occupants = building_config.get('max_occupants', 4)
             self.current_occupants = 0
-        elif building_type in ['shop', 'factory', 'farm', 'woodcutter', 'quarry', 'mine', 'workshop']:
+            self.capacity = self.max_occupants  # Add capacity attribute for houses
+        elif building_type == 'family_house':
+            self.max_occupants = building_config.get('max_occupants', 6)
+            self.current_occupants = 0
+            self.capacity = self.max_occupants
+        elif building_type in ['shop', 'factory', 'farm', 'woodcutter', 'quarry', 'mine', 'workshop', 'food_processor', 'advanced_mine', 'lumber_mill']:
             # Initialize resource inventory for production buildings
             if self.produces:
                 self.inventory[self.produces] = 0
@@ -87,17 +130,38 @@ class Building:
         self.base_size = TILE_SIZE * self.size
         self.colors = {
             'house': (100, 200, 100),
+            'family_house': (120, 220, 120),  # Slightly brighter green for family house
             'farm': (150, 200, 50),
-            'factory': (150, 150, 150),
-            'shop': (200, 150, 100),
             'woodcutter': (139, 69, 19),
             'quarry': (169, 169, 169),
             'mine': (105, 105, 105),
+            'advanced_mine': (85, 85, 125),  # Darker color for advanced buildings
             'workshop': (200, 200, 100),
             'market': (200, 150, 100),
             'tavern': (200, 100, 200),
-            'government': (150, 150, 200)
+            'government': (150, 150, 200),
+            'food_processor': (200, 150, 50),
+            'lumber_mill': (160, 82, 45),
+            'storage_warehouse': (180, 180, 180),
+            'school': (100, 100, 220),
+            'university': (80, 80, 240),
+            'library': (120, 120, 240)
         }
+
+        # Initialize inventory and resources immediately
+        self.inventory = {}
+        if self.produces:
+            self.inventory[self.produces] = 0
+            # Ensure resource exists in colony inventory
+            if self.produces not in world.colony_inventory:
+                world.colony_inventory[self.produces] = 0
+                
+            # Start passive production immediately if it's a resource building
+            if building_type in ['quarry', 'woodcutter', 'mine', 'farm']:
+                self.construction_progress = 0.1  # Give slight progress to enable production
+                if self.produces == 'stone':  # Special handling for quarry
+                    # Add small initial amount to make production visible
+                    world.colony_inventory[self.produces] = max(5, world.colony_inventory.get(self.produces, 0))
 
     def get_grid_bounds(self):
         """Get the grid coordinates this building occupies"""
@@ -112,10 +176,15 @@ class Building:
             self.construction_progress += speed_multiplier * 0.01
             if self.construction_progress >= self.build_time:
                 self.is_complete = True
+                # Now that building is complete, assign critical positions if needed
+                self.assign_critical_positions()
+                # Start producing immediately when complete
+                if self.produces:
+                    self.produce_resources(speed_multiplier)
         else:
             # Operational phase
-            if self.building_type in ['farm', 'woodcutter', 'quarry', 'mine', 'workshop']:
-                self.produce_resources()
+            if self.produces:
+                self.produce_resources(speed_multiplier)
             
             # Handle sales
             if hasattr(self, 'sells'):
@@ -132,102 +201,127 @@ class Building:
             self.daily_revenue = 0
             self.daily_expenses = 0
             
-            # Handle production
-            if self.produces and self.jobs:
-                active_workers = len([job for job in self.jobs if job.employee])
-                if active_workers > 0:
-                    efficiency = active_workers / self.max_jobs
-                    production = self.production_rate * efficiency * speed_multiplier
-                    self.world.add_to_colony_inventory(self.produces, production)
-
             # Apply happiness bonus to nearby colonists
             if self.happiness_bonus > 0:
                 for colonist in self.world.colonists:
                     distance = ((colonist.x - self.x)**2 + (colonist.y - self.y)**2)**0.5
-                    if distance < 200:  # Happiness bonus radius
+                    if distance < HAPPINESS_RADIUS:
                         colonist.happiness = min(100, colonist.happiness + 
                                               (self.happiness_bonus / 100) * speed_multiplier)
 
-    def produce_resources(self):
+    def produce_resources(self, speed_multiplier=1.0):
         """Produce resources if this is a production building with enhanced efficiency"""
-        if not self.produces or not self.is_complete:
+        if not self.produces:
+            return
+            
+        # Allow production during construction for basic resource buildings
+        if not self.is_complete and self.building_type not in ['quarry', 'woodcutter', 'mine', 'farm']:
             return
             
         workers = [job.employee for job in self.jobs if job.employee]
-        if not workers:
-            # Small passive production even without workers
-            passive_production = self.production_rate * 0.1
+        
+        # Always produce at least a small amount, even without workers
+        # Increased base production rate for quarries specifically
+        base_rate = self.production_rate * speed_multiplier  # Apply speed multiplier here
+        if self.building_type == 'quarry':
+            base_rate *= 2.0  # Doubled bonus for quarries to make production more noticeable
+        
+        # Increased base production for all resource buildings
+        base_production = base_rate * (0.5 if not workers else 1.5)  # Increased both passive and active production
+        
+        # Calculate efficiency based on workers
+        efficiency = 1.0
+        if workers:
+            # Worker skill bonuses
+            skill_bonus = 0
+            for worker in workers:
+                if self.building_type == 'farm':
+                    skill_bonus += worker.skills.get('farming', 50) / 500
+                elif self.building_type in ['woodcutter', 'quarry', 'mine']:
+                    skill_bonus += worker.skills.get('mining', 50) / 400  # Increased skill impact
+                elif self.building_type == 'workshop':
+                    skill_bonus += worker.skills.get('crafting', 50) / 500
+                
+                if hasattr(worker, 'is_critical_position') and worker.is_critical_position:
+                    skill_bonus += CRITICAL_POSITION_BONUS
             
-            # Apply storage limit
-            current_amount = self.inventory.get(self.produces, 0)
-            new_amount = min(current_amount + passive_production, self.max_storage)
+            efficiency = (len(workers) / self.max_jobs) + skill_bonus
+        
+        # Building type bonuses to encourage variety
+        type_multiplier = {
+            'woodcutter': 1.35,
+            'quarry': 1.6,  # Further increased from 1.4 to make stone production more viable
+            'mine': 1.35,
+            'workshop': 1.4,
+            'farm': 1.0
+        }.get(self.building_type, 1.0)
+        
+        # Calculate final production amount with speed multiplier
+        production = base_production * efficiency * type_multiplier
+        
+        # Transfer directly to colony inventory for basic resource buildings
+        if self.building_type in ['quarry', 'woodcutter', 'mine', 'farm']:
+            if self.produces not in self.world.colony_inventory:
+                self.world.colony_inventory[self.produces] = 0
+            
+            # Add production to colony inventory
+            production_amount = production
+            self.world.colony_inventory[self.produces] += production_amount
+            
+            # Update efficiency tracker for UI
+            self.efficiency = efficiency
+            
+            # Update worker tasks
+            for worker in workers:
+                worker.current_task = f"working at {self.building_type}"
+            
+            # Debug logging
+            if hasattr(self.world, 'debug_log'):
+                self.world.debug_log(f"Building {self.building_type} produced {production_amount:.1f} {self.produces}")
+        else:
+            # For more complex buildings, use the building's inventory
+            if self.produces not in self.inventory:
+                self.inventory[self.produces] = 0
+            
+            current_amount = self.inventory[self.produces]
+            new_amount = min(current_amount + production, self.max_storage)
             self.inventory[self.produces] = new_amount
+
+    def has_input_resources(self):
+        """Check if required input resources are available"""
+        if not self.inputs:
+            return True
             
-            # Transfer to colony inventory periodically
-            if self.world.day_timer % 100 == 0:  # Every 100 ticks
-                transfer_amount = min(current_amount, 5.0)  # Small transfer
-                if transfer_amount > 0:
-                    self.inventory[self.produces] -= transfer_amount
-                    
-                    # Ensure colony inventory tracks the resource
-                    if self.produces not in self.world.colony_inventory:
-                        self.world.colony_inventory[self.produces] = 0
-                        
-                    self.world.colony_inventory[self.produces] += transfer_amount
-            return
-        
-        # Calculate base efficiency based on worker count
-        base_efficiency = len(workers) / max(1, self.max_jobs)
-        
-        # Calculate bonus based on worker skills and traits
-        skill_bonus = 0
-        for worker in workers:
-            # Different skills matter for different buildings
-            if self.building_type == 'farm':
-                skill_bonus += worker.traits.get('work_ethic', 50) / 500  # 0-0.2 bonus
-            elif self.building_type in ['woodcutter', 'quarry', 'mine']:
-                skill_bonus += worker.traits.get('ambition', 50) / 500  # 0-0.2 bonus
-            elif self.building_type == 'workshop':
-                skill_bonus += worker.traits.get('creativity', 50) / 500  # 0-0.2 bonus
+        for resource, amount in self.inputs.items():
+            if self.world.colony_inventory.get(resource, 0) < amount:
+                return False
+        return True
+    
+    def consume_input_resources(self, production_amount):
+        """Consume input resources for production chain and return success"""
+        if not self.inputs:
+            return True
             
-            # Give non-farm buildings a bonus to counter farm preference
-            if self.building_type != 'farm':
-                skill_bonus += 0.1  # Extra 10% bonus for non-farms
+        # Calculate how much input is needed based on production
+        input_needed = {}
+        for resource, base_amount in self.inputs.items():
+            # Scale input needs with production 
+            input_needed[resource] = base_amount * (production_amount / self.production_rate)
         
-        # Calculate total production with enhanced bonuses
-        efficiency = base_efficiency + skill_bonus
-        production = self.production_rate * efficiency
+        # Check if we have enough of all inputs
+        for resource, amount in input_needed.items():
+            if self.world.colony_inventory.get(resource, 0) < amount:
+                return False
         
-        # Apply building-specific production bonuses to counter farm bias
-        if self.building_type == 'woodcutter':
-            production *= 1.25  # Woodcutter bonus
-        elif self.building_type == 'quarry':
-            production *= 1.2   # Quarry bonus 
-        elif self.building_type == 'mine':
-            production *= 1.25  # Mine bonus
-        elif self.building_type == 'workshop':
-            production *= 1.3   # Workshop gets best bonus
-        
-        # Apply storage limit
-        current_amount = self.inventory.get(self.produces, 0)
-        new_amount = min(current_amount + production, self.max_storage)
-        self.inventory[self.produces] = new_amount
-        
-        # Transfer resources to colony inventory if we have workers
-        if workers and len(workers) > 0:
-            transfer_amount = min(new_amount, production * 2)  # Transfer up to 2x production
-            if transfer_amount > 0:
-                self.inventory[self.produces] -= transfer_amount
+        # Consume the resources
+        for resource, amount in input_needed.items():
+            self.world.colony_inventory[resource] -= amount
+            
+            # Log consumption
+            if hasattr(self.world, 'debug_log'):
+                self.world.debug_log(f"Resource chain: consumed {amount:.2f} {resource} for {self.building_type}")
                 
-                # Make sure the colony inventory has this resource type
-                if self.produces not in self.world.colony_inventory:
-                    self.world.colony_inventory[self.produces] = 0
-                    
-                self.world.colony_inventory[self.produces] += transfer_amount
-                
-                # Show indicator for resource production
-                for worker in workers:
-                    worker.current_task = f"working at {self.building_type}"
+        return True
 
     def update_prices(self):
         """Update prices based on supply and demand"""
@@ -284,7 +378,7 @@ class Building:
         # Process interest for all colonists
         for colonist in self.world.colonists:
             if colonist.money > 0:
-                interest = colonist.money * (self.interest_rate / 365)  # Daily interest
+                interest = colonist.money * (INTEREST_RATE / 365)  # Daily interest
                 colonist.money += interest
                 colonist.inventory['money'] = colonist.money
                 self.daily_expenses += interest
@@ -309,6 +403,33 @@ class Building:
             
         # Return the created jobs list so it can be added to the world.jobs list
         return self.jobs
+    
+    def assign_critical_positions(self):
+        """Assign critical position status to specific jobs based on building type and tier"""
+        if not self.jobs or len(self.jobs) == 0:
+            return
+            
+        # Advanced buildings (tier 3) always have at least one critical position
+        if self.tier == BUILDING_TIERS['ADVANCED']:
+            self.jobs[0].is_critical = True
+            self.has_critical_positions = True
+            
+            # For larger advanced buildings, make more positions critical
+            if len(self.jobs) >= 4:
+                self.jobs[1].is_critical = True
+        
+        # Intermediate buildings (tier 2) have critical positions for leadership roles
+        elif self.tier == BUILDING_TIERS['INTERMEDIATE']:
+            # Buildings that require specialized skills
+            if self.building_type in ['lumber_mill', 'food_processor', 'government']:
+                self.jobs[0].is_critical = True
+                self.has_critical_positions = True
+        
+        # Special case for specialized resource production
+        if self.building_type in ['advanced_mine', 'lumber_mill'] or self.produces == 'meals':
+            # Make at least one position critical
+            self.jobs[0].is_critical = True
+            self.has_critical_positions = True
 
     def render(self, screen, camera_x=0, camera_y=0, zoom=1.0):
         """Render building with improved visual feedback"""
@@ -322,6 +443,15 @@ class Building:
         # Draw building base - no centering adjustment needed since position is already grid-aligned
         building_rect = pygame.Rect(screen_x, screen_y, size, size)
         color = self.colors.get(self.building_type, (200, 200, 200))
+        
+        # Adjust color based on building tier
+        if self.tier == BUILDING_TIERS['INTERMEDIATE']:
+            # Slightly richer colors for intermediate tier
+            color = tuple(min(255, c * 1.1) for c in color)
+        elif self.tier == BUILDING_TIERS['ADVANCED']:
+            # More saturated colors for advanced tier
+            color = tuple(min(255, int(c * 0.9 + 40)) for c in color)
+        
         if not self.is_complete:
             # Show construction progress
             progress = self.construction_progress / self.build_time
@@ -329,6 +459,11 @@ class Building:
         
         # Draw building
         pygame.draw.rect(screen, color, building_rect)
+        
+        # Draw border for buildings with critical positions
+        if self.has_critical_positions and self.is_complete:
+            # Gold border for buildings with critical positions
+            pygame.draw.rect(screen, (255, 215, 0), building_rect, 2)
         
         # Draw grid lines for multi-tile buildings
         if self.size > 1:
@@ -344,21 +479,46 @@ class Building:
         
         # Show building status indicators
         if self.is_complete:
-            if hasattr(self, 'jobs'):
+            if hasattr(self, 'jobs') and self.jobs:
                 # Show employment status for work buildings
                 filled_jobs = len([job for job in self.jobs if job.employee])
-                if self.jobs and filled_jobs < len(self.jobs):
+                if filled_jobs < len(self.jobs):
                     # Draw "Help Wanted" indicator
                     pygame.draw.circle(screen, (255, 200, 0),
                                     (int(screen_x + size - 5), int(screen_y + 5)), 
                                     int(3 * zoom))
-            elif self.building_type == 'house':
+                
+                # Show efficiency indicator if producing
+                if self.produces and filled_jobs > 0:
+                    # Draw efficiency bar (green to red based on efficiency)
+                    eff_width = int((size - 6) * min(1.0, self.efficiency))
+                    # Color ranges from red (0%) to yellow (50%) to green (100%)
+                    if self.efficiency < 0.5:
+                        # Red to yellow
+                        eff_color = (255, int(255 * (self.efficiency * 2)), 0)
+                    else:
+                        # Yellow to green
+                        eff_color = (int(255 * (2 - self.efficiency * 2)), 255, 0)
+                    
+                    pygame.draw.rect(screen, eff_color,
+                                  (screen_x + 3, screen_y + size - 6,
+                                   eff_width, 3))
+            
+            elif self.building_type in ['house', 'family_house']:
                 # Show occupancy for houses
-                if self.current_occupants < self.capacity:
+                if self.current_occupants < self.max_occupants:
                     # Draw "Vacancy" indicator
                     pygame.draw.circle(screen, (100, 255, 100),
                                     (int(screen_x + size - 5), int(screen_y + 5)),
                                     int(3 * zoom))
+                
+                # Special indicator for family houses
+                if self.building_type == 'family_house':
+                    # Heart icon for family houses
+                    heart_size = int(4 * zoom)
+                    pygame.draw.circle(screen, (255, 100, 100),
+                                     (int(screen_x + size/2), int(screen_y + 5)),
+                                     heart_size)
         else:
             # Show construction progress bar
             progress_width = (size - 4) * (self.construction_progress / self.build_time)
@@ -368,14 +528,14 @@ class Building:
 
     def add_occupant(self):
         """Add an occupant to a house"""
-        if self.building_type == 'house' and self.current_occupants < self.capacity:
+        if self.building_type in ['house', 'family_house'] and self.current_occupants < self.capacity:
             self.current_occupants += 1
             return True
         return False
 
     def remove_occupant(self):
         """Remove an occupant from a house"""
-        if self.building_type == 'house' and self.current_occupants > 0:
+        if self.building_type in ['house', 'family_house'] and self.current_occupants > 0:
             self.current_occupants -= 1
             return True
         return False

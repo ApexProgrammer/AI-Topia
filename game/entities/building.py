@@ -71,13 +71,20 @@ class Building:
         self.production_rate = building_config.get('production_rate', 0)
         self.tier = building_config.get('tier', 1)  # Building tier level
         
-        # Initialize inventory for production buildings immediately
+        # Initialize inventory only once
         self.inventory = {}
         if self.produces:
             self.inventory[self.produces] = 0
             # Initialize in colony inventory if not exists
             if self.produces not in self.world.colony_inventory:
                 self.world.colony_inventory[self.produces] = 0
+                
+            # Start passive production immediately for all resource production buildings
+            if building_type in ['quarry', 'woodcutter', 'mine', 'workshop', 'farm']:
+                self.construction_progress = 0.2  # Start with some progress
+                # Add small initial amount for basic resources
+                if self.produces in ['stone', 'metal', 'wood']:
+                    world.colony_inventory[self.produces] = max(10, world.colony_inventory.get(self.produces, 0))
 
         # Storage capacity
         self.storage_multiplier = building_config.get('storage_multiplier', 1.0)
@@ -156,12 +163,12 @@ class Building:
             if self.produces not in world.colony_inventory:
                 world.colony_inventory[self.produces] = 0
                 
-            # Start passive production immediately if it's a resource building
+            # Start passive production immediately for all resource buildings
             if building_type in ['quarry', 'woodcutter', 'mine', 'farm']:
-                self.construction_progress = 0.1  # Give slight progress to enable production
-                if self.produces == 'stone':  # Special handling for quarry
-                    # Add small initial amount to make production visible
-                    world.colony_inventory[self.produces] = max(5, world.colony_inventory.get(self.produces, 0))
+                self.construction_progress = 0.2  # Increased initial progress
+                # Add small initial amount for all basic resources
+                if self.produces in ['stone', 'metal', 'wood']:
+                    world.colony_inventory[self.produces] = max(10, world.colony_inventory.get(self.produces, 0))
 
     def get_grid_bounds(self):
         """Get the grid coordinates this building occupies"""
@@ -178,13 +185,13 @@ class Building:
                 self.is_complete = True
                 # Now that building is complete, assign critical positions if needed
                 self.assign_critical_positions()
-                # Start producing immediately when complete
-                if self.produces:
-                    self.produce_resources(speed_multiplier)
-        else:
-            # Operational phase
-            if self.produces:
-                self.produce_resources(speed_multiplier)
+        
+        # Always call produce_resources for resource buildings, even during construction
+        if self.produces and self.building_type in ['quarry', 'woodcutter', 'mine', 'farm']:
+            self.produce_resources(speed_multiplier)
+        elif self.is_complete and self.produces:
+            # Other buildings only produce when complete
+            self.produce_resources(speed_multiplier)
             
             # Handle sales
             if hasattr(self, 'sells'):
@@ -214,20 +221,20 @@ class Building:
         if not self.produces:
             return
             
-        # Allow production during construction for basic resource buildings
+        # Allow all resource buildings to produce during construction
         if not self.is_complete and self.building_type not in ['quarry', 'woodcutter', 'mine', 'farm']:
             return
             
         workers = [job.employee for job in self.jobs if job.employee]
         
         # Always produce at least a small amount, even without workers
-        # Increased base production rate for quarries specifically
-        base_rate = self.production_rate * speed_multiplier  # Apply speed multiplier here
-        if self.building_type == 'quarry':
-            base_rate *= 2.0  # Doubled bonus for quarries to make production more noticeable
+        # Increased base production rate for basic resource buildings
+        base_rate = self.production_rate * speed_multiplier
+        if self.building_type in ['quarry', 'mine', 'woodcutter']:
+            base_rate *= 1.5  # Increased passive production for basic resources
         
-        # Increased base production for all resource buildings
-        base_production = base_rate * (0.5 if not workers else 1.5)  # Increased both passive and active production
+        # Base production with improved passive generation
+        base_production = base_rate * (0.3 if not workers else 1.5)  # Increased passive production from 0.2 to 0.3
         
         # Calculate efficiency based on workers
         efficiency = 1.0
@@ -238,7 +245,7 @@ class Building:
                 if self.building_type == 'farm':
                     skill_bonus += worker.skills.get('farming', 50) / 500
                 elif self.building_type in ['woodcutter', 'quarry', 'mine']:
-                    skill_bonus += worker.skills.get('mining', 50) / 400  # Increased skill impact
+                    skill_bonus += worker.skills.get('mining', 50) / 400
                 elif self.building_type == 'workshop':
                     skill_bonus += worker.skills.get('crafting', 50) / 500
                 
@@ -247,45 +254,36 @@ class Building:
             
             efficiency = (len(workers) / self.max_jobs) + skill_bonus
         
-        # Building type bonuses to encourage variety
+        # Building type bonuses
         type_multiplier = {
             'woodcutter': 1.35,
-            'quarry': 1.6,  # Further increased from 1.4 to make stone production more viable
+            'quarry': 1.6,   # Higher multiplier for stone
             'mine': 1.35,
             'workshop': 1.4,
             'farm': 1.0
         }.get(self.building_type, 1.0)
         
-        # Calculate final production amount with speed multiplier
+        # Calculate final production amount
         production = base_production * efficiency * type_multiplier
         
-        # Transfer directly to colony inventory for basic resource buildings
-        if self.building_type in ['quarry', 'woodcutter', 'mine', 'farm']:
-            if self.produces not in self.world.colony_inventory:
-                self.world.colony_inventory[self.produces] = 0
-            
-            # Add production to colony inventory
-            production_amount = production
-            self.world.colony_inventory[self.produces] += production_amount
-            
-            # Update efficiency tracker for UI
-            self.efficiency = efficiency
-            
-            # Update worker tasks
-            for worker in workers:
-                worker.current_task = f"working at {self.building_type}"
-            
-            # Debug logging
-            if hasattr(self.world, 'debug_log'):
-                self.world.debug_log(f"Building {self.building_type} produced {production_amount:.1f} {self.produces}")
-        else:
-            # For more complex buildings, use the building's inventory
-            if self.produces not in self.inventory:
-                self.inventory[self.produces] = 0
-            
-            current_amount = self.inventory[self.produces]
-            new_amount = min(current_amount + production, self.max_storage)
-            self.inventory[self.produces] = new_amount
+        # Initialize resource in colony inventory if needed
+        if self.produces not in self.world.colony_inventory:
+            self.world.colony_inventory[self.produces] = 0
+        
+        # Add production to colony inventory
+        production_amount = production
+        self.world.colony_inventory[self.produces] += production_amount
+        
+        # Debug logging
+        if hasattr(self.world, 'debug_log'):
+            self.world.debug_log(f"Building {self.building_type} produced {production_amount:.1f} {self.produces}")
+
+        # Update efficiency tracker for UI
+        self.efficiency = efficiency
+        
+        # Update worker tasks
+        for worker in workers:
+            worker.current_task = f"working at {self.building_type}"
 
     def has_input_resources(self):
         """Check if required input resources are available"""

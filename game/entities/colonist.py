@@ -461,18 +461,36 @@ class Colonist:
             return (0, 255, 0)  # Green
 
     def seek_job(self):
-        """Find and move to an available job with simplified logic"""
+        """Find and move to an available job with balanced distribution"""
         if not self.job and WORKING_AGE <= self.age <= RETIREMENT_AGE:
             # Get all buildings that can have jobs
             work_buildings = [b for b in self.world.buildings 
                             if b.max_jobs > 0 and len([j for j in b.jobs if not j.employee]) > 0]
             
             if work_buildings:
-                # Find closest building with open jobs
+                # Group buildings by type
+                building_types = {}
+                for building in work_buildings:
+                    if building.building_type not in building_types:
+                        building_types[building.building_type] = []
+                    building_types[building.building_type].append(building)
+                
+                # Calculate worker distribution for each building type
+                type_distribution = {}
+                for building_type in building_types:
+                    total_jobs = sum(b.max_jobs for b in self.world.buildings if b.building_type == building_type)
+                    filled_jobs = sum(len([j for j in b.jobs if j.employee]) for b in self.world.buildings if b.building_type == building_type)
+                    if total_jobs > 0:
+                        type_distribution[building_type] = filled_jobs / total_jobs
+                
+                # Find building type with lowest worker percentage
+                target_type = min(type_distribution.items(), key=lambda x: x[1])[0]
+                
+                # Find closest building of target type
                 closest_building = None
                 min_distance = float('inf')
                 
-                for building in work_buildings:
+                for building in building_types.get(target_type, []):
                     dist = ((self.x - building.x)**2 + (self.y - building.y)**2)**0.5
                     if dist < min_distance:
                         min_distance = dist
@@ -484,9 +502,7 @@ class Colonist:
                         if not job.employee:
                             self.job = job
                             job.employee = self
-                            # Set current task to working
                             self.current_task = f"working at {closest_building.building_type}"
-                            # Move to job location
                             self.target_position = (closest_building.x, closest_building.y)
                             return True
         

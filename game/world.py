@@ -130,25 +130,29 @@ class World:
         if y is None and isinstance(x, (tuple, list)):
             x, y = x
         
-        if self.screen_width and self.screen_height:
-            # Remove centering offset
-            x = x - (self.screen_width - self.width) // 2
-            y = y - (self.screen_height - self.height) // 2
+        # Account for world offset - this is critical for proper positioning after expansion
+        x = x - self.offset_x
+        y = y - self.offset_y
         
-        # Ensure perfect grid alignment
-        grid_x = max(0, min(self.current_size - 1, x // TILE_SIZE))
-        grid_y = max(0, min(self.current_size - 1, y // TILE_SIZE))
+        # Ensure perfect grid alignment with proper int conversion and clamping
+        grid_x = int(x / TILE_SIZE)
+        grid_y = int(y / TILE_SIZE)
         
-        return (int(grid_x), int(grid_y))
+        # Clamp to valid grid range
+        grid_x = max(0, min(self.current_size - 1, grid_x))
+        grid_y = max(0, min(self.current_size - 1, grid_y))
+        
+        return (grid_x, grid_y)
 
     def get_pixel_position(self, x, y=None):
         """Convert grid coordinates to world coordinates (top-left of tile)"""
         if y is None and isinstance(x, (tuple, list)):
             x, y = x[0], x[1]
         
-        # Convert to pixel coordinates and align to tile top-left
-        world_x = x * TILE_SIZE
-        world_y = y * TILE_SIZE
+        # Convert grid coordinates to pixel coordinates exactly
+        # This is crucial for maintaining consistent building placement
+        world_x = int(x * TILE_SIZE)
+        world_y = int(y * TILE_SIZE)
         
         # Add world offset
         world_x += self.offset_x
@@ -297,19 +301,26 @@ class World:
                          self.offset_y + camera_y,
                          self.width, self.height))
         
-        # Draw grid
+        # Draw grid - ensure ALL grid lines are rendered
         grid_color = (40, 40, 40)
+        
+        # Draw all vertical grid lines
         for x in range(self.current_size + 1):
-            screen_x = self.offset_x + x * TILE_SIZE + camera_x
+            screen_x = int((self.offset_x + x * TILE_SIZE) * zoom + camera_x)
+            start_y = int((self.offset_y) * zoom + camera_y)
+            end_y = int((self.offset_y + self.height) * zoom + camera_y)
             pygame.draw.line(screen, grid_color,
-                           (screen_x, self.offset_y + camera_y),
-                           (screen_x, self.offset_y + self.height + camera_y))
+                           (screen_x, start_y),
+                           (screen_x, end_y))
             
+        # Draw all horizontal grid lines
         for y in range(self.current_size + 1):
-            screen_y = self.offset_y + y * TILE_SIZE + camera_y
+            screen_y = int((self.offset_y + y * TILE_SIZE) * zoom + camera_y)
+            start_x = int((self.offset_x) * zoom + camera_x)
+            end_x = int((self.offset_x + self.width) * zoom + camera_x)
             pygame.draw.line(screen, grid_color,
-                           (self.offset_x + camera_x, screen_y),
-                           (self.offset_x + self.width + camera_y, screen_y))
+                           (start_x, screen_y),
+                           (end_x, screen_y))
         
         # Draw building zones if in building mode
         if self.ui and self.ui.show_building_menu:
@@ -677,47 +688,31 @@ class World:
         EXPANSION_COST += 100
 
     def handle_deaths(self):
-        """Handle colonist deaths"""
+        """Handle colonist deaths - modified to prevent deaths"""
         current_time = pygame.time.get_ticks()
         
         for colonist in self.colonists[:]:  # Copy list to allow removal
-            # Death conditions:
-            # 1. Old age (increased chance after 70)
-            # 2. Poor health
-            # 3. Accidents (very small chance)
+            # Death conditions have been removed - colonists are now immortal
             
-            death_chance = 0
-            
-            if colonist.age > 70:
-                death_chance += (colonist.age - 70) * 0.0001
-            
+            # Instead of death, just ensure health is always above critical level
             if colonist.health < 20:
-                death_chance += (20 - colonist.health) * 0.001
-            
-            death_chance += 0.0001  # Base accident chance
-            
-            # Policy effects
-            if self.ui and self.ui.policies['healthcare']:
-                death_chance *= 0.5
-            
-            if random.random() < death_chance:
-                # Record death
-                self.death_history.append({
-                    'time': current_time,
-                    'colonist': colonist,
-                    'age': colonist.age,
-                    'cause': 'natural' if colonist.age > 70 else 'health' if colonist.health < 20 else 'accident'
-                })
+                colonist.health = max(20, colonist.health + 5)  # Boost health to avoid critical condition
                 
-                # Remove from lists
-                self.colonists.remove(colonist)
-                if colonist.job:
-                    colonist.job.employee = None
-                if colonist.home:
-                    colonist.home.current_occupants -= 1
-                if colonist == self.leader:
-                    self.leader = None
-                    self.election_timer = self.term_length  # Trigger immediate election
+            # If colonist is elderly, keep them healthy
+            if colonist.age > 70:
+                colonist.health = max(colonist.health, 50)  # Ensure elderly colonists stay healthy
+                
+            # Log any near-death experiences for record keeping
+            if colonist.health < 30:
+                # Only log once per colonist
+                if not hasattr(colonist, 'near_death_logged'):
+                    self.death_history.append({
+                        'time': current_time,
+                        'colonist': colonist,
+                        'age': colonist.age,
+                        'cause': 'recovered' 
+                    })
+                    colonist.near_death_logged = True
 
     def handle_event(self, event):
         """Handle pygame events"""
@@ -762,27 +757,105 @@ class World:
         return (grid_x, grid_y) in self.grid_occupation
 
     def check_expansion_needed(self):
-        """Check if map needs to expand based on population density"""
+        """Check if map needs to expand based on population density or building count"""
+        # Calculate basic density metrics
         total_tiles = self.current_size * self.current_size
-        colonist_density = len(self.colonists) / total_tiles
-        building_density = len(self.buildings) / total_tiles
+        colonist_density = len(self.colonists) / total_tiles if total_tiles > 0 else 1.0
+        building_density = len(self.buildings) / total_tiles if total_tiles > 0 else 1.0
         
-        return (colonist_density > COLONISTS_PER_TILE or 
-                building_density > BUILDINGS_PER_TILE)
+        # Check if we're approaching the edge of the map with buildings
+        edge_crowding = False
+        
+        for building in self.buildings:
+            # Handle both real buildings and mocks for testing
+            if hasattr(building, 'x') and hasattr(building, 'y'):
+                try:
+                    grid_x, grid_y = self.get_grid_position(building.x, building.y)
+                    # Check if building is near the edge
+                    edge_buffer = 3  # Number of tiles from edge to consider "crowded"
+                    if (grid_x < edge_buffer or grid_x > self.current_size - edge_buffer or 
+                        grid_y < edge_buffer or grid_y > self.current_size - edge_buffer):
+                        edge_crowding = True
+                        break
+                except (TypeError, AttributeError):
+                    # Skip mocked buildings that don't have proper attributes
+                    pass
+        
+        # Calculate percentage of grid occupied by buildings
+        building_occupation_count = 0
+        for grid_pos, occupants in self.grid_occupation.items():
+            if any(isinstance(occupant, Building) for occupant in occupants):
+                building_occupation_count += 1
+        
+        building_occupation_percentage = building_occupation_count / total_tiles if total_tiles > 0 else 0
+        
+        # Debug message for UI if available
+        if hasattr(self, 'ui') and self.ui and building_occupation_percentage > 0.5:
+            self.ui.show_message(f"Grid occupation: {building_occupation_percentage:.1%}")
+            
+        # The density check is the primary trigger - if there are enough buildings relative to map size, expand
+        if building_density > BUILDINGS_PER_TILE * 0.5:  # 50% reduction in threshold
+            return True
+            
+        # Additional checks that can also trigger expansion
+        return (colonist_density > COLONISTS_PER_TILE * 0.6 or  # 40% reduction in threshold
+                edge_crowding or                                # Buildings too close to edge
+                building_occupation_percentage > 0.5)           # Over 50% of grid has buildings
 
     def expand_map(self):
-        """Expand the map size without limitations so the colony advances continuously"""
+        """Expand the map size by adding an outer layer around the existing grid"""
         old_size = self.current_size
-        self.current_size += EXPANSION_BUFFER
+        
+        # Reduce expansion amount for slower growth
+        # Previously was: expansion_amount = EXPANSION_BUFFER + 2
+        expansion_amount = max(2, EXPANSION_BUFFER // 2)  # Roughly half the previous expansion rate
+        
+        # Make expansion larger if the map is already big, but still slower than before
+        if self.current_size > 30:
+            expansion_amount += 1  # Previously added 2
+            
+        # Calculate new size
+        new_size = self.current_size + expansion_amount
+        
+        # Calculate how much will be added to each side (half the total expansion)
+        side_expansion = expansion_amount / 2
+        
+        # Store old dimensions for adjustment calculations
+        old_width = self.width
+        old_height = self.height
+        old_offset_x = self.offset_x
+        old_offset_y = self.offset_y
+        
+        # Update size and dimensions
+        self.current_size = new_size
         self.width = self.current_size * TILE_SIZE
         self.height = self.current_size * TILE_SIZE
         
-        # Record expansion (cost removed)
+        # Adjust offset to maintain the center position
+        # This shifts the world coordinates to account for the expansion
+        self.offset_x -= (side_expansion * TILE_SIZE)
+        self.offset_y -= (side_expansion * TILE_SIZE)
+        
+        # Record expansion with detailed information
         self.expansion_history.append({
             'time': pygame.time.get_ticks(),
             'old_size': old_size,
-            'new_size': self.current_size
+            'new_size': new_size,
+            'old_offset_x': old_offset_x,
+            'old_offset_y': old_offset_y,
+            'new_offset_x': self.offset_x,
+            'new_offset_y': self.offset_y
         })
+        
+        # Show detailed notification if UI exists
+        if self.ui:
+            expansion_info = f"Map expanded from {old_size}x{old_size} to {new_size}x{new_size}!"
+            self.ui.show_message(expansion_info)
+            
+        # Force UI camera update to show the new map size
+        if self.ui:
+            self.ui.update_map_dimensions(self.width, self.height)
+            
         return True
 
     def set_ui(self, ui):

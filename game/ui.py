@@ -878,18 +878,23 @@ class UI:
             y += button_height + 5
 
     def _render_building_preview(self, screen):
-        """Render building placement preview"""
+        """Render building placement preview with improved accuracy during/after expansion"""
         if not self.selected_building_type:
             return
             
         mouse_pos = pygame.mouse.get_pos()
         world_pos = self.screen_to_world(mouse_pos)
-        grid_x, grid_y = self.world.get_grid_position(world_pos[0], world_pos[1])
+        
+        # Convert to grid position with proper offsets applied
+        grid_x = int((world_pos[0] - self.world.offset_x) / TILE_SIZE)
+        grid_y = int((world_pos[1] - self.world.offset_y) / TILE_SIZE)
         self.hovering_grid_pos = (grid_x, grid_y)
         
+        # Only show preview for valid grid positions
         if 0 <= grid_x < self.world.current_size and 0 <= grid_y < self.world.current_size:
-            # Get exact grid-aligned position
-            pixel_x, pixel_y = self.world.get_pixel_position(grid_x, grid_y)
+            # Get exact grid-aligned position with proper offset
+            pixel_x = grid_x * TILE_SIZE + self.world.offset_x
+            pixel_y = grid_y * TILE_SIZE + self.world.offset_y
             
             # Convert world coordinates to screen coordinates with zoom
             screen_x = int((pixel_x + self.camera_x) * self.zoom)
@@ -904,7 +909,7 @@ class UI:
             
             # Create preview surface with proper size
             highlight_surface = pygame.Surface((total_size, total_size))
-            highlight_surface.set_alpha(128)
+            highlight_surface.set_alpha(160)  # Slightly more opaque for better visibility
             
             # Set color based on validity
             if can_build:
@@ -917,18 +922,34 @@ class UI:
             highlight_surface.fill(color)
             screen.blit(highlight_surface, (screen_x, screen_y))
             
-            # Draw grid lines to show tiles
+            # Draw grid lines to show tiles more clearly
+            line_color = (255, 255, 255)
+            line_thickness = max(1, int(self.zoom))
+            
+            # Draw all vertical grid lines within the building footprint
             for i in range(building_size + 1):
-                # Vertical lines
                 line_x = screen_x + i * int(TILE_SIZE * self.zoom)
-                pygame.draw.line(screen, (255, 255, 255),
+                pygame.draw.line(screen, line_color,
                                (line_x, screen_y),
-                               (line_x, screen_y + total_size))
-                # Horizontal lines
+                               (line_x, screen_y + total_size), line_thickness)
+                
+            # Draw all horizontal grid lines within the building footprint
+            for i in range(building_size + 1):
                 line_y = screen_y + i * int(TILE_SIZE * self.zoom)
-                pygame.draw.line(screen, (255, 255, 255),
+                pygame.draw.line(screen, line_color,
                                (screen_x, line_y),
-                               (screen_x + total_size, line_y))
+                               (screen_x + total_size, line_y), line_thickness)
+                
+            # Draw building type label if zoomed in enough
+            if self.zoom >= 0.8:
+                label = self.font.render(self.selected_building_type.title(), True, (255, 255, 255))
+                label_bg = pygame.Surface((label.get_width() + 4, label.get_height() + 4))
+                label_bg.set_alpha(200)
+                label_bg.fill((0, 0, 0))
+                screen.blit(label_bg, (screen_x + total_size//2 - label.get_width()//2 - 2, 
+                                     screen_y + total_size//2 - label.get_height()//2 - 2))
+                screen.blit(label, (screen_x + total_size//2 - label.get_width()//2, 
+                                  screen_y + total_size//2 - label.get_height()//2))
 
     def _render_alerts(self, screen):
         """Render alerts in bottom-left corner with improved visibility and spacing"""
@@ -1517,3 +1538,21 @@ class UI:
                         (screen_x + size, screen_y + icon_size)
                     ]
                 )
+
+    def update_map_dimensions(self, width, height):
+        """Update camera and UI elements when the map size changes"""
+        # Update camera bounds based on new map size
+        self.world_width = width
+        self.world_height = height
+        
+        # Adjust camera position to ensure the expanded map is visible
+        # Center camera on the existing content rather than on the edges
+        center_x = width / 2
+        center_y = height / 2
+        
+        # Show a message about the map expansion
+        self.show_message(f"Map expanded to {width // TILE_SIZE}x{height // TILE_SIZE} tiles")
+        
+        # Recalculate building zones with the new dimensions
+        if hasattr(self.world, 'update_building_zones'):
+            self.world.update_building_zones()

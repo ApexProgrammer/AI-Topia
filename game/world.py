@@ -239,7 +239,7 @@ class World:
         return True
 
     def generate_initial_colony(self):
-        """Generate initial colony with only the central government building"""
+        """Generate initial colony with government building and assigned jobs"""
         # Calculate center of grid
         center_x = self.current_size // 2
         center_y = self.current_size // 2
@@ -249,16 +249,32 @@ class World:
         gov_building = Building(building_type='government', x=gov_pos[0], y=gov_pos[1], world=self)
         self.buildings.append(gov_building)
         self.add_to_grid(gov_building, center_x, center_y)
-        self.jobs.extend(gov_building.create_jobs())
         
-        # Create initial colonists near government building
+        # Create initial basic resource buildings
+        building_positions = [
+            ('farm', (center_x - 2, center_y - 2)),
+            ('woodcutter', (center_x + 2, center_y - 2)),
+            ('mine', (center_x - 2, center_y + 2)),
+        ]
+        
+        for b_type, (x, y) in building_positions:
+            pos = self.get_pixel_position(x, y)
+            building = Building(building_type=b_type, x=pos[0], y=pos[1], world=self)
+            self.buildings.append(building)
+            self.add_to_grid(building, x, y)
+            if hasattr(building, 'create_jobs'):
+                self.jobs.extend(building.create_jobs())
+        
+        # Create initial colonists with job assignments
         placement_positions = [
             (0,1), (1,0), (0,-1), (-1,0),  # Adjacent positions
             (1,1), (-1,1), (1,-1), (-1,-1), # Diagonal positions
-            (0,2), (2,0)  # Two extra positions to ensure 10 colonists
+            (0,2), (2,0)  # Extra positions
         ]
         
-        for dx, dy in placement_positions:
+        job_types = ['farmer', 'miner', 'woodcutter', 'unemployed']
+        
+        for idx, (dx, dy) in enumerate(placement_positions):
             colonist_grid_x = center_x + dx
             colonist_grid_y = center_y + dy
             
@@ -268,6 +284,18 @@ class World:
                 if not self.is_grid_occupied(colonist_grid_x, colonist_grid_y):
                     colonist_pos = self.get_pixel_position(colonist_grid_x, colonist_grid_y)
                     colonist = Colonist(colonist_pos[0], colonist_pos[1], self)
+                    
+                    # Assign initial job type
+                    job_type = job_types[idx % len(job_types)]
+                    colonist.role = job_type
+                    
+                    # If there's an available job matching their role, assign it
+                    matching_jobs = [j for j in self.jobs if not j.employee and j.type == job_type]
+                    if matching_jobs:
+                        job = matching_jobs[0]
+                        colonist.job = job
+                        job.employee = colonist
+                    
                     self.colonists.append(colonist)
                     self.add_to_grid(colonist, colonist_grid_x, colonist_grid_y)
 

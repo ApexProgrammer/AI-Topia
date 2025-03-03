@@ -149,6 +149,27 @@ class Colonist:
         self.high_contrast_enabled = False  # Default to standard mode
         self.text_scale = 1.0  # Default text scale
 
+        # Job and role attributes
+        self.role = 'unemployed'  # Default role
+        self.job = None
+        self.preferred_jobs = ['farmer', 'miner', 'woodcutter']
+        self.job_experience = {
+            'farmer': 0,
+            'miner': 0,
+            'woodcutter': 0
+        }
+
+        # Adjust initial skills based on role
+        self.skills = {
+            'farming': random.randint(20, 50),
+            'mining': random.randint(20, 50),
+            'woodcutting': random.randint(20, 50),
+            'crafting': random.randint(20, 50),
+            'construction': random.randint(20, 50),
+            'education': random.randint(20, 50),
+            'leadership': random.randint(20, 50),
+        }
+
     def update(self, speed_multiplier=1.0):
         # Store previous position for interpolation
         self.prev_pos = (self.x, self.y)
@@ -461,52 +482,35 @@ class Colonist:
             return (0, 255, 0)  # Green
 
     def seek_job(self):
-        """Find and move to an available job with balanced distribution"""
+        """Find and move to an available job with preference for current role"""
         if not self.job and WORKING_AGE <= self.age <= RETIREMENT_AGE:
-            # Get all buildings that can have jobs
-            work_buildings = [b for b in self.world.buildings 
-                            if b.max_jobs > 0 and len([j for j in b.jobs if not j.employee]) > 0]
+            # Only look for jobs matching the colonist's role
+            if self.role in ['farmer', 'woodcutter', 'miner']:
+                matching_building_types = {
+                    'farmer': 'farm',
+                    'woodcutter': 'woodcutter',
+                    'miner': 'quarry'
+                }
+                building_type = matching_building_types.get(self.role)
+                
+                # Find jobs in matching buildings
+                matching_jobs = [j for j in self.world.jobs 
+                               if not j.employee and 
+                               hasattr(j, 'building') and 
+                               j.building.building_type == building_type]
+                
+                if matching_jobs:
+                    # Pick closest job
+                    closest_job = min(matching_jobs,
+                        key=lambda j: ((j.x - self.x)**2 + (j.y - self.y)**2)**0.5)
+                    
+                    self.job = closest_job
+                    closest_job.employee = self
+                    return True
             
-            if work_buildings:
-                # Group buildings by type
-                building_types = {}
-                for building in work_buildings:
-                    if building.building_type not in building_types:
-                        building_types[building.building_type] = []
-                    building_types[building.building_type].append(building)
-                
-                # Calculate worker distribution for each building type
-                type_distribution = {}
-                for building_type in building_types:
-                    total_jobs = sum(b.max_jobs for b in self.world.buildings if b.building_type == building_type)
-                    filled_jobs = sum(len([j for j in b.jobs if j.employee]) for b in self.world.buildings if b.building_type == building_type)
-                    if total_jobs > 0:
-                        type_distribution[building_type] = filled_jobs / total_jobs
-                
-                # Find building type with lowest worker percentage
-                target_type = min(type_distribution.items(), key=lambda x: x[1])[0]
-                
-                # Find closest building of target type
-                closest_building = None
-                min_distance = float('inf')
-                
-                for building in building_types.get(target_type, []):
-                    dist = ((self.x - building.x)**2 + (self.y - building.y)**2)**0.5
-                    if dist < min_distance:
-                        min_distance = dist
-                        closest_building = building
-                
-                if closest_building:
-                    # Take the first available job
-                    for job in closest_building.jobs:
-                        if not job.employee:
-                            self.job = job
-                            job.employee = self
-                            self.current_task = f"working at {closest_building.building_type}"
-                            self.target_position = (closest_building.x, closest_building.y)
-                            return True
-        
-        return False
+            # If unemployed or invalid role, don't assign any job
+            self.role = 'unemployed'
+            return False
 
     def move_to_job(self, job):
         """Move to and take a job with improved pathfinding"""

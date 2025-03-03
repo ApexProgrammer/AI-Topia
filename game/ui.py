@@ -81,7 +81,8 @@ class UI:
         button_spacing = 15
         button_y = 10
         self.buttons = {
-            'build': Button(10, button_y, button_width, 30, 'Build', COLORS['button'])
+            'build': Button(10, button_y, button_width, 30, 'Build', COLORS['button']),
+            'jobs': Button(120, button_y, button_width, 30, 'Jobs', COLORS['button'])  # Position next to building button
         }
         
         # Policy and law settings
@@ -175,6 +176,7 @@ class UI:
         # Building menu and placement
         self.selected_building_type = None
         self.show_building_menu = False
+        self.show_jobs_menu = False
         self.hovering_grid_pos = None
         self.tooltip_text = None
 
@@ -276,6 +278,9 @@ class UI:
                         self.tooltip_text = None
                     else:
                         self.world.update_building_zones()
+                elif button_type == 'jobs':
+                    self.show_jobs_menu = not self.show_jobs_menu
+                    self.show_building_menu = False  # Close building menu
                 return True
         return False
 
@@ -396,6 +401,7 @@ class UI:
         
         # Update button states
         self.buttons['build'].active = self.show_building_menu
+        self.buttons['jobs'].active = self.show_jobs_menu
 
         # Update message timer
         if self.message and self.message_timer > 0:
@@ -466,6 +472,10 @@ class UI:
             # Always render preview if we have a selected building type
             if self.selected_building_type:
                 self._render_building_preview(self.screen)
+
+        # Show jobs menu if active
+        if self.show_jobs_menu:
+            self.render_jobs_menu()
 
         # Alerts at bottom-left
         self._render_alerts(self.screen)
@@ -1556,3 +1566,27 @@ class UI:
         # Recalculate building zones with the new dimensions
         if hasattr(self.world, 'update_building_zones'):
             self.world.update_building_zones()
+
+    def render_jobs_menu(self):
+        """Render the jobs menu with list of workers and their roles"""
+        menu_rect = pygame.Rect(120, 50, 200, 300)
+        pygame.draw.rect(self.screen, (40, 40, 40), menu_rect)
+        
+        y_offset = 60
+        job_types = {
+            'farmer': 0,
+            'woodcutter': 0,
+            'miner': 0,
+            'unemployed': 0
+        }
+        
+        # Count workers by job type
+        for colonist in self.world.colonists:
+            role = colonist.role if colonist.role in job_types else 'unemployed'
+            job_types[role] += 1
+            
+        # Display job counts
+        for job, count in job_types.items():
+            text = f"{job.capitalize()}: {count}"
+            self.draw_text(self.screen, text, 220, y_offset)  # Fixed: added self.screen as first argument
+            y_offset += 30
